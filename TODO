@@ -1,0 +1,8 @@
+handle couchbase and choose cluster, bucket, scope, collections
+Cluster : only one server
+
+Bucket : only one since it's the only applications
+
+Scope and collections : depends on the decision of alternative branch.
+The problem would be that I can easily create two layer because of scopes and collections but it wouldn't be possible to go further
+It's stupid so, every new branch should create a new documents with a modification in name. I could also add a fild to the parent and index to load recursively

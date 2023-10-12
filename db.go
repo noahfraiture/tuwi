@@ -2,9 +2,11 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/sashabaranov/go-openai"
 	"os"
+	"sync"
 )
 
 type conversation struct {
@@ -12,19 +14,32 @@ type conversation struct {
 	model    string
 	name     string
 	messages []openai.ChatCompletionMessage
+	valid    bool
+	*sync.Mutex
 }
 
-func store(conv conversation) {
-	jsonBytes, err := json.Marshal(conv)
+func (c conversation) invalid() {
+	c.Lock()
+	defer c.Unlock()
+	c.messages = nil
+	c.valid = false
+}
+
+// TODO : test pointer
+func store(conv conversation) error {
+	conv.Lock()
+	defer conv.Unlock()
+	if !conv.valid {
+		return errors.New("conversation is invalid, can't store")
+	}
+	jsonBytes, err := json.Marshal(conv) // TODO : will store mutex ?
 	if err != nil {
-		fmt.Println(err) // TODO : error handling
-		return
+		return err
 	}
 
 	f, err := os.OpenFile("/db/"+conv.name, os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
-		fmt.Println(err)
-		return
+		return err
 	}
 	defer func(f *os.File) {
 		err := f.Close()
@@ -35,23 +50,44 @@ func store(conv conversation) {
 	}(f)
 	_, err = f.Write(jsonBytes)
 	if err != nil {
-		fmt.Println(err)
-		return
+		return err
 	}
+	return nil
 }
 
-func load(filename string) conversation {
+func loadConversation(filename string) (conversation, error) {
 	var conv conversation
 
 	jsonBytes, err := os.ReadFile(filename)
 	if err != nil {
-		fmt.Println(err)
-		return conv // todo : handle errors
+		return conv, err // todo : handle errors
 	}
 
 	err = json.Unmarshal(jsonBytes, &conv)
 	if err != nil {
-		fmt.Println(err)
+		return conv, err
 	}
-	return conv
+	// TODO : check if value is well always true and if not handle the case since it can't be load better
+	return conv, nil
+}
+
+type history struct {
+	valid   bool
+	history []string
+	*sync.Mutex
+}
+
+func loadHistory() (history, error) {
+	var hist history
+
+	jsonBytes, err := os.ReadFile("history.json")
+	if err != nil {
+		return hist, err
+	}
+
+	err = json.Unmarshal(jsonBytes, &hist)
+	if err != nil {
+		return hist, err
+	}
+	return hist, nil
 }

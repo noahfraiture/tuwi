@@ -33,6 +33,18 @@ func getKey() string {
 	return key.key
 }
 
+// TODO : invalid key on every error or need change
+func (key *Key) invalid() bool {
+	key.mutex.Lock()
+	defer key.mutex.Unlock()
+	ok := true
+	if key.key == "" {
+		ok = false
+	}
+	key.key = ""
+	return ok
+}
+
 type OpenClient struct {
 	client *openai.Client
 	mutex  sync.Mutex
@@ -47,6 +59,17 @@ func getClient() *openai.Client {
 		openClient.client = openai.NewClient(getKey())
 	}
 	return openClient.client
+}
+
+func (openClient *OpenClient) invalid() bool {
+	openClient.mutex.Lock()
+	defer openClient.mutex.Unlock()
+	ok := true
+	if openClient.client == nil {
+		ok = false
+	}
+	openClient.client = nil
+	return ok
 }
 
 // Todo : gotta decide if I do procedure or function.
