@@ -7,5 +7,5 @@
 /dataSources/
 /dataSources.local.xml
 # openAI key
-/key
-/db/
+../key
+../db/
