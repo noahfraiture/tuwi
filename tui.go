@@ -1,7 +1,6 @@
 package main
 
 import (
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/sashabaranov/go-openai"
 )
 
@@ -14,8 +13,6 @@ type model struct {
 	cursor  int
 }
 
-var state convMut
-
 func modelsSelectionModel() model {
 	return model{
 		choices: []string{openai.GPT3Dot5Turbo, openai.GPT4},
@@ -23,6 +20,7 @@ func modelsSelectionModel() model {
 	}
 }
 
+/*
 func historySelectionModel() model {
 	// TODO : create and handle DB
 	return model{
@@ -66,3 +64,4 @@ func (m modelSelection) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	return m, nil
 }
+*/

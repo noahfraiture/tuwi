@@ -4,10 +4,98 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/couchbase/gocb/v2"
 	"github.com/sashabaranov/go-openai"
 	"os"
 	"sync"
+	"time"
 )
+
+type couchDB struct {
+	username         string
+	password         string
+	connectionString string
+	bucketName       string
+	scopeName        string
+	collectionName   string
+	cluster          *gocb.Cluster
+	bucket           *gocb.Bucket
+	scope            *gocb.Scope
+	collection       *gocb.Collection
+	sync.Mutex
+}
+
+func (selfDB *couchDB) getCluster() (*gocb.Cluster, error) {
+	selfDB.Lock()
+	defer selfDB.Unlock()
+	if selfDB.cluster == nil {
+		cluster, err := gocb.Connect("couchbase://"+selfDB.connectionString, gocb.ClusterOptions{
+			Authenticator: gocb.PasswordAuthenticator{
+				Username: selfDB.username,
+				Password: selfDB.password,
+			},
+		})
+		if err != nil {
+			return nil, err
+		}
+		selfDB.cluster = cluster
+	}
+	return selfDB.cluster, nil
+}
+
+func (selfDB *couchDB) getBucket() (*gocb.Bucket, error) {
+	selfDB.Lock()
+	defer selfDB.Unlock()
+	if selfDB.bucket == nil {
+		cluster, err := selfDB.getCluster()
+		if err != nil {
+			return nil, err
+		}
+		bucket := cluster.Bucket(selfDB.bucketName)
+		err = bucket.WaitUntilReady(5*time.Second, nil)
+		if err != nil {
+			return nil, err
+		}
+		selfDB.bucket = bucket
+	}
+	return selfDB.bucket, nil
+}
+
+func (selfDB *couchDB) getScope() (*gocb.Scope, error) {
+	selfDB.Lock()
+	defer selfDB.Unlock()
+	if selfDB.scope == nil {
+		bucket, err := selfDB.getBucket()
+		if err != nil {
+			return nil, err
+		}
+		selfDB.scope = bucket.Scope(selfDB.scopeName)
+	}
+	return selfDB.scope, nil
+}
+
+func (selfDB *couchDB) getCollection() (*gocb.Collection, error) {
+	selfDB.Lock()
+	defer selfDB.Unlock()
+	if selfDB.collection == nil {
+		scope, err := selfDB.getScope()
+		if err != nil {
+			return nil, err
+		}
+		selfDB.collection = scope.Collection(selfDB.collectionName)
+	}
+	return selfDB.collection, nil
+}
+
+// TODO : if I want to divide my db in multiple scope, I can divide this structure in multiple struct
+var db = couchDB{
+	username:         "admin",
+	password:         "admin123",
+	connectionString: "localhost",
+	bucketName:       "conversations",
+	scopeName:        "_default",
+	collectionName:   "_default",
+}
 
 type conversation struct {
 	length   int
