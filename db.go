@@ -86,33 +86,27 @@ func (selfDB *couchDB) getCollection() (*gocb.Collection, error) {
 }
 
 func (selfDB *couchDB) invalidCollection() {
-	selfDB.Lock()
-	defer selfDB.Unlock()
 	selfDB.collection = nil
 }
 
 func (selfDB *couchDB) invalidScope() {
-	selfDB.Lock()
-	defer selfDB.Unlock()
+	selfDB.invalidCollection()
 	selfDB.scope = nil
-	selfDB.collection = nil
 }
 
 func (selfDB *couchDB) invalidBucket() {
-	selfDB.Lock()
-	defer selfDB.Unlock()
+	selfDB.invalidScope()
 	selfDB.bucket = nil
-	selfDB.scope = nil
-	selfDB.collection = nil
 }
 
-func (selfDB *couchDB) invalidCluster() {
-	selfDB.Lock()
-	defer selfDB.Unlock()
+func (selfDB *couchDB) invalidCluster() error {
+	selfDB.invalidBucket()
+	err := selfDB.cluster.Close(nil)
+	if err != nil {
+		return err
+	}
 	selfDB.cluster = nil
-	selfDB.bucket = nil
-	selfDB.scope = nil
-	selfDB.collection = nil
+	return nil
 }
 
 // Lazy
@@ -174,27 +168,26 @@ func (selfDB *couchDB) storeConversation(conv *conversation) error {
 }
 
 // TODO : couldn't I get only the id to avoid useless call ?
-func (selfDB *couchDB) documents() ([]conversation, error) {
+func (selfDB *couchDB) getDocumentsID() ([]string, error) {
 	scope, err := selfDB.getScope()
 	if err != nil {
 		return nil, err
 	}
 	queryRes, err := scope.Query(
-		fmt.Sprintf("SELECT * FROM %s", selfDB.collectionName),
+		fmt.Sprintf("SELECT META().id FROM %s", selfDB.collectionName),
 		&gocb.QueryOptions{},
 	)
 	if err != nil {
 		return nil, err
 	}
-	convList := make([]conversation, 8)
+	idList := make([]string, 8)
 	for queryRes.Next() {
-		tmpConv := conversation{}
-		err = queryRes.Row(&tmpConv)
+		var tmpID string
+		err = queryRes.Row(&tmpID)
 		if err != nil {
 			return nil, err
 		}
-		convList = append(convList, tmpConv)
+		idList = append(idList, tmpID)
 	}
-	return convList, nil
-
+	return idList, nil
 }
