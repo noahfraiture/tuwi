@@ -1,16 +1,14 @@
 package main
 
 import (
-	"encoding/json"
-	"errors"
 	"fmt"
 	"github.com/couchbase/gocb/v2"
 	"github.com/sashabaranov/go-openai"
-	"os"
 	"sync"
 	"time"
 )
 
+// TODO : if I want to divide my db in multiple scope, I can divide this structure in multiple struct
 type couchDB struct {
 	username         string
 	password         string
@@ -87,95 +85,116 @@ func (selfDB *couchDB) getCollection() (*gocb.Collection, error) {
 	return selfDB.collection, nil
 }
 
-// TODO : if I want to divide my db in multiple scope, I can divide this structure in multiple struct
-var db = couchDB{
-	username:         "admin",
-	password:         "admin123",
-	connectionString: "localhost",
-	bucketName:       "conversations",
-	scopeName:        "_default",
-	collectionName:   "_default",
+func (selfDB *couchDB) invalidCollection() {
+	selfDB.Lock()
+	defer selfDB.Unlock()
+	selfDB.collection = nil
+}
+
+func (selfDB *couchDB) invalidScope() {
+	selfDB.Lock()
+	defer selfDB.Unlock()
+	selfDB.scope = nil
+	selfDB.collection = nil
+}
+
+func (selfDB *couchDB) invalidBucket() {
+	selfDB.Lock()
+	defer selfDB.Unlock()
+	selfDB.bucket = nil
+	selfDB.scope = nil
+	selfDB.collection = nil
+}
+
+func (selfDB *couchDB) invalidCluster() {
+	selfDB.Lock()
+	defer selfDB.Unlock()
+	selfDB.cluster = nil
+	selfDB.bucket = nil
+	selfDB.scope = nil
+	selfDB.collection = nil
+}
+
+// Lazy
+func (selfDB *couchDB) changeBucket(newBucket string) {
+	selfDB.Lock()
+	defer selfDB.Unlock()
+	selfDB.invalidBucket()
+	selfDB.bucketName = newBucket
+}
+
+// Lazy
+func (selfDB *couchDB) changeScope(newScope string) {
+	selfDB.Lock()
+	defer selfDB.Unlock()
+	selfDB.invalidScope()
+	selfDB.scopeName = newScope
+}
+
+// Lazy
+func (selfDB *couchDB) changeCollection(newCollection string) {
+	selfDB.Lock()
+	defer selfDB.Unlock()
+	selfDB.invalidCollection()
+	selfDB.collectionName = newCollection
 }
 
 type conversation struct {
-	length   int
-	model    string
-	name     string
-	messages []openai.ChatCompletionMessage
-	valid    bool
-	*sync.Mutex
+	id          string
+	length      int
+	model       string
+	name        string
+	messages    []openai.ChatCompletionMessage // TODO : are these message able to be json ?
+	hasChange   bool
+	*sync.Mutex // TODO : how will it be store in json ?
 }
 
-func (c conversation) invalid() {
-	c.Lock()
-	defer c.Unlock()
-	c.messages = nil
-	c.valid = false
-}
-
-// TODO : test pointer
-func store(conv conversation) error {
-	conv.Lock()
-	defer conv.Unlock()
-	if !conv.valid {
-		return errors.New("conversation is invalid, can't store")
+func (selfDB *couchDB) getConversation(id string) (conversation, error) {
+	col, err := selfDB.getCollection()
+	if err != nil {
+		return conversation{}, nil
 	}
-	jsonBytes, err := json.Marshal(conv) // TODO : will store mutex ?
+	res, err := col.Get(id, nil) // TODO : check possible option and api
+	if err != nil {
+		return conversation{}, err
+	}
+	conv := conversation{}
+	err = res.Content(&conv)
+	return conv, err
+}
+
+func (selfDB *couchDB) storeConversation(conv *conversation) error {
+	// TODO : upsert or insert ?
+	col, err := selfDB.getCollection()
 	if err != nil {
 		return err
 	}
+	_, err = col.Upsert(conv.id, conv, nil) // TODO : what about mutation returned value
+	return err
+}
 
-	f, err := os.OpenFile("/db/"+conv.name, os.O_CREATE|os.O_WRONLY, 0644)
+// TODO : couldn't I get only the id to avoid useless call ?
+func (selfDB *couchDB) documents() ([]conversation, error) {
+	scope, err := selfDB.getScope()
 	if err != nil {
-		return err
+		return nil, err
 	}
-	defer func(f *os.File) {
-		err := f.Close()
+	queryRes, err := scope.Query(
+		fmt.Sprintf("SELECT * FROM %s", selfDB.collectionName),
+		&gocb.QueryOptions{},
+	)
+	if err != nil {
+		return nil, err
+	}
+	convList := make([]conversation, 8)
+	for queryRes.Next() {
+		tmpConv := conversation{}
+		err = queryRes.Row(&tmpConv)
 		if err != nil {
-			fmt.Println(err)
-			return
+			return nil, err
 		}
-	}(f)
-	_, err = f.Write(jsonBytes)
-	if err != nil {
-		return err
+		convList = append(convList, tmpConv)
 	}
-	return nil
-}
+	return convList, nil
 
-func loadConversation(filename string) (conversation, error) {
-	var conv conversation
-
-	jsonBytes, err := os.ReadFile(filename)
-	if err != nil {
-		return conv, err // todo : handle errors
-	}
-
-	err = json.Unmarshal(jsonBytes, &conv)
-	if err != nil {
-		return conv, err
-	}
-	// TODO : check if value is well always true and if not handle the case since it can't be load better
-	return conv, nil
-}
-
-type history struct {
-	valid   bool
-	history []string
-	*sync.Mutex
-}
-
-func loadHistory() (history, error) {
-	var hist history
-
-	jsonBytes, err := os.ReadFile("history.json")
-	if err != nil {
-		return hist, err
-	}
-
-	err = json.Unmarshal(jsonBytes, &hist)
-	if err != nil {
-		return hist, err
-	}
-	return hist, nil
 }

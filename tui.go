@@ -1,26 +1,48 @@
 package main
 
 import (
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/sashabaranov/go-openai"
 )
 
 var (
 	MODELS = []string{openai.GPT3Dot5Turbo, openai.GPT4}
+
+	// TODO : decide if conversation and DB are store here or in the model
+	// I prefer to keep the model simple and strict to the display
+	// but it generate global variable
+	// Also part of the conversation like message must be display
+	db = couchDB{
+		username: "admin",
+		password: "admin123",
+		connectionString: "localhost",
+		bucketName: "conversations",
+		scopeName: "_default",
+		collectionName: "_default",
+	}
+	currentConversation conversation
 )
 
 type model struct {
-	choices []string
-	cursor  int
+	choices        []string
+	cursor         int
+	currentMessage string
+	lastResponse   string
+	aiModel        string
+	systemMessage  string
+	convID         string
 }
 
 func modelsSelectionModel() model {
 	return model{
-		choices: []string{openai.GPT3Dot5Turbo, openai.GPT4},
+		choices: MODELS,
 		cursor:  0,
 	}
 }
 
-/*
+func (m model) Init() tea.Cmd { return nil }
+
+/
 func historySelectionModel() model {
 	// TODO : create and handle DB
 	return model{
