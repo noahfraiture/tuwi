@@ -91,19 +91,27 @@ func (m model) Init() tea.Cmd {
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if msg, ok := msg.(tea.KeyMsg); ok {
-		k := msg.String()
-		if k == "q" || k == "esc" || k == "ctrl+c" {
+	if msg, ok := msg.(tea.KeyMsg); ok { // TODO : change that shit
+		switch msg.Type {
+		case tea.KeyCtrlC, tea.KeyEsc:
 			m.quitting = true
 			return m, tea.Quit
 		}
 	}
 
 	switch m.state {
-	case "ai":
-		return m.mAI.Update(msg)
 	case "conv":
-		return m.mConv.Update(msg)
+		tmpModel, tmpCmd := m.mConv.Update(msg)
+		if m.mConv.choice != nil {
+			m.state = "ai"
+		}
+		return tmpModel, tmpCmd
+	case "ai": // choose the model of AI for new conversation
+		tmpModel, tmpCmd := m.mAI.Update(msg)
+		if m.mAI.choice != nil {
+			m.state = "system"
+		}
+		return tmpModel, tmpCmd
 	case "system":
 		return m.mSystem.Update(msg)
 	case "question":
@@ -132,67 +140,15 @@ func (m model) View() string {
 	}
 }
 
-// Model and method for the AI selection
+// Model ond method for CONVERSATION CHOICE
 
 type item struct {
 	title, desc string
 }
 
-func (i item) FilterValue() string {
-	return i.title
-}
-
-type modelAI struct {
-	list   list.Model
-	choice item
-}
-
-func initialModelAI() modelAI {
-	aiModels := []list.Item{
-		item{title: openai.GPT3Dot5Turbo, desc: "price placeholder"},
-		item{title: openai.GPT4, desc: "gpt4 placeholder"},
-	}
-	return modelAI{
-		list: list.New(aiModels, list.NewDefaultDelegate(), 0, 0),
-	}
-}
-
-func (m modelAI) Init() tea.Cmd {
-	return nil
-}
-
-func (m modelAI) View() string {
-	return docStyle.Render(m.list.View())
-}
-
-func (m modelAI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch msg.String() {
-		case "ctrl+c":
-			return m, tea.Quit // TODO : quitting bool ? Here or will be detected in main ? Maybe useless here
-		case "enter":
-			i, ok := m.list.SelectedItem().(item)
-			if ok {
-				m.choice = i
-			}
-			return m, tea.Quit
-
-		}
-	case tea.WindowSizeMsg:
-		h, v := docStyle.GetFrameSize()
-		m.list.SetSize(msg.Width-h, msg.Height-v)
-	}
-
-	var cmd tea.Cmd
-	m.list, cmd = m.list.Update(msg)
-	return m, cmd
-}
-
-// Model ond method for CONVERSATION CHOICE
-
 type modelConv struct {
-	list list.Model
+	list   list.Model
+	choice *item
 }
 
 func initialConversationModel() (modelConv, error) {
@@ -221,8 +177,66 @@ func (m modelConv) View() string {
 func (m modelConv) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		if msg.String() == "ctrl+c" {
+		switch msg.Type {
+		case tea.KeyEnter:
+			i, ok := m.list.SelectedItem().(item)
+			if ok {
+				m.choice = &i
+			}
+		case tea.KeyCtrlC, tea.KeyEsc:
 			return m, tea.Quit
+		}
+	case tea.WindowSizeMsg:
+		h, v := docStyle.GetFrameSize()
+		m.list.SetSize(msg.Width-h, msg.Height-v)
+	}
+
+	var cmd tea.Cmd
+	m.list, cmd = m.list.Update(msg)
+	return m, cmd
+}
+
+// Model and method for the AI selection
+// TODO : really duplicate with conversation section, is there a necessity to split them ?
+
+func (i item) FilterValue() string {
+	return i.title
+}
+
+type modelAI struct {
+	list   list.Model
+	choice *item
+}
+
+func initialModelAI() modelAI {
+	aiModels := []list.Item{
+		item{title: openai.GPT3Dot5Turbo, desc: "price placeholder"},
+		item{title: openai.GPT4, desc: "gpt4 placeholder"},
+	}
+	return modelAI{
+		list: list.New(aiModels, list.NewDefaultDelegate(), 0, 0),
+	}
+}
+
+func (m modelAI) Init() tea.Cmd {
+	return nil
+}
+
+func (m modelAI) View() string {
+	return docStyle.Render(m.list.View())
+}
+
+func (m modelAI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.Type {
+		case tea.KeyEnter:
+			i, ok := m.list.SelectedItem().(item)
+			if ok {
+				m.choice = &i
+			}
+		case tea.KeyCtrlC, tea.KeyEsc:
+			return m, tea.Quit // TODO : quitting bool ? Here or will be detected in main ? Should never be reached
 		}
 	case tea.WindowSizeMsg:
 		h, v := docStyle.GetFrameSize()
@@ -238,6 +252,7 @@ func (m modelConv) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 type modelSystem struct {
 	textInput textinput.Model
+	content   string
 	err       error
 }
 
@@ -270,7 +285,9 @@ func (m modelSystem) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.Type {
-		case tea.KeyEnter, tea.KeyCtrlC, tea.KeyEsc:
+		case tea.KeyEnter:
+			m.content = m.textInput.Value() // TODO : right command ?
+		case tea.KeyCtrlC, tea.KeyEsc:
 			return m, tea.Quit
 		}
 	case error:
@@ -285,6 +302,7 @@ func (m modelSystem) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 type modelQuestion struct {
 	textInput textinput.Model
+	content   string
 	err       error
 }
 
@@ -317,7 +335,9 @@ func (m modelQuestion) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.Type {
-		case tea.KeyEnter, tea.KeyCtrlC, tea.KeyEsc:
+		case tea.KeyEnter:
+			m.content = m.textInput.Value()
+		case tea.KeyCtrlC, tea.KeyEsc:
 			return m, tea.Quit
 		}
 	case error:
