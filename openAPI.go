@@ -8,12 +8,6 @@ import (
 	"sync"
 )
 
-func check(e error) {
-	if e != nil {
-		panic(e)
-	}
-}
-
 type Key struct {
 	key   string
 	mutex sync.Mutex
@@ -21,16 +15,18 @@ type Key struct {
 
 var key = Key{}
 
-func getKey() string {
+func getKey() (string, error) {
 	key.mutex.Lock()
 	defer key.mutex.Unlock()
 	if key.key == "" {
 		dat, err := os.ReadFile("key")
-		check(err)
+		if err != nil {
+			return "", err
+		}
 		key.key = string(dat)
 		fmt.Print("Key loaded") // TODO : remove key
 	}
-	return key.key
+	return key.key, nil
 }
 
 // TODO : invalid key on every error or need change
@@ -52,13 +48,17 @@ type OpenClient struct {
 
 var openClient = OpenClient{}
 
-func getClient() *openai.Client {
+func getClient() (*openai.Client, error) {
 	openClient.mutex.Lock()
 	defer openClient.mutex.Unlock()
 	if openClient.client == nil {
-		openClient.client = openai.NewClient(getKey())
+		key, err := getKey()
+		if err != nil {
+			return nil, err
+		}
+		openClient.client = openai.NewClient(key)
 	}
-	return openClient.client
+	return openClient.client, nil
 }
 
 func (openClient *OpenClient) invalid() bool {
@@ -72,50 +72,31 @@ func (openClient *OpenClient) invalid() bool {
 	return ok
 }
 
-// Todo : gotta decide if I do procedure or function.
-// Procedure make it un-natural to create alternative. I gotta see if it's a real thing.
-// If it's rare thing it may not be interesting and cost too much
-// For now it's gonna be procedure for this and function for new conv
-func chatCompletion(question string, messages *[]openai.ChatCompletionMessage, model string) (openai.FinishReason, error) {
-	client := getClient()
+func (mes *Conversation) chatCompletion(question string, model string) (openai.FinishReason, error) {
+	client, err := getClient()
+	if err != nil {
+		return "", err
+	}
 	ctx := context.Background()
 
-	newMessage := openai.ChatCompletionMessage{
+	newQuestion := openai.ChatCompletionMessage{
 		Role:    openai.ChatMessageRoleUser,
 		Content: question,
 	}
-	*messages = append(*messages, newMessage)
+	mes.messages = append(mes.messages, newQuestion)
+	mes.hasChange = true
 
 	req := openai.ChatCompletionRequest{
 		Model:     model,
 		MaxTokens: 20, // TODO : edit hyper parameters
-		Messages:  *messages,
+		Messages:  mes.messages,
 		Stream:    false,
 	}
 
 	resp, err := client.CreateChatCompletion(ctx, req)
-	return resp.Choices[0].FinishReason, err // Todo : is there a choices 0 in case of err ?
-}
 
-func newConversation(question string, model string, systemMessage string) []openai.ChatCompletionMessage {
-	if model == "" {
-		model = openai.GPT3Dot5Turbo
-	}
-	var messages []openai.ChatCompletionMessage
-	if systemMessage != "" {
-		messages = []openai.ChatCompletionMessage{
-			{
-				Role:    openai.ChatMessageRoleSystem,
-				Content: systemMessage,
-			},
-		}
-	} else {
-		messages = []openai.ChatCompletionMessage{}
-	}
-	_, err := chatCompletion(question, &messages, model)
-	// todo : handle finished reason and errors
-	if err != nil {
-		fmt.Println(err)
-	}
-	return messages
+	// Todo : is there a choices 0 in case of err ?
+	// TODO : we add the messages to the struct but don't return it
+	mes.messages = append(mes.messages, resp.Choices[0].Message)
+	return resp.Choices[0].FinishReason, err
 }

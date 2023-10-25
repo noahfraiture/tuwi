@@ -3,13 +3,12 @@ package main
 import (
 	"fmt"
 	"github.com/couchbase/gocb/v2"
-	"github.com/sashabaranov/go-openai"
 	"sync"
 	"time"
 )
 
-// TODO : if I want to divide my db in multiple scope, I can divide this structure in multiple struct
-type couchDB struct {
+// CouchDB TODO : if I want to divide my db in multiple scope, I can divide this structure in multiple struct
+type CouchDB struct {
 	username         string
 	password         string
 	connectionString string
@@ -23,7 +22,7 @@ type couchDB struct {
 	sync.Mutex
 }
 
-func (selfDB *couchDB) getCluster() (*gocb.Cluster, error) {
+func (selfDB *CouchDB) getCluster() (*gocb.Cluster, error) {
 	selfDB.Lock()
 	defer selfDB.Unlock()
 	if selfDB.cluster == nil {
@@ -41,7 +40,7 @@ func (selfDB *couchDB) getCluster() (*gocb.Cluster, error) {
 	return selfDB.cluster, nil
 }
 
-func (selfDB *couchDB) getBucket() (*gocb.Bucket, error) {
+func (selfDB *CouchDB) getBucket() (*gocb.Bucket, error) {
 	selfDB.Lock()
 	defer selfDB.Unlock()
 	if selfDB.bucket == nil {
@@ -59,7 +58,7 @@ func (selfDB *couchDB) getBucket() (*gocb.Bucket, error) {
 	return selfDB.bucket, nil
 }
 
-func (selfDB *couchDB) getScope() (*gocb.Scope, error) {
+func (selfDB *CouchDB) getScope() (*gocb.Scope, error) {
 	selfDB.Lock()
 	defer selfDB.Unlock()
 	if selfDB.scope == nil {
@@ -72,7 +71,7 @@ func (selfDB *couchDB) getScope() (*gocb.Scope, error) {
 	return selfDB.scope, nil
 }
 
-func (selfDB *couchDB) getCollection() (*gocb.Collection, error) {
+func (selfDB *CouchDB) getCollection() (*gocb.Collection, error) {
 	selfDB.Lock()
 	defer selfDB.Unlock()
 	if selfDB.collection == nil {
@@ -85,21 +84,21 @@ func (selfDB *couchDB) getCollection() (*gocb.Collection, error) {
 	return selfDB.collection, nil
 }
 
-func (selfDB *couchDB) invalidCollection() {
+func (selfDB *CouchDB) invalidCollection() {
 	selfDB.collection = nil
 }
 
-func (selfDB *couchDB) invalidScope() {
+func (selfDB *CouchDB) invalidScope() {
 	selfDB.invalidCollection()
 	selfDB.scope = nil
 }
 
-func (selfDB *couchDB) invalidBucket() {
+func (selfDB *CouchDB) invalidBucket() {
 	selfDB.invalidScope()
 	selfDB.bucket = nil
 }
 
-func (selfDB *couchDB) invalidCluster() error {
+func (selfDB *CouchDB) invalidCluster() error {
 	selfDB.invalidBucket()
 	err := selfDB.cluster.Close(nil)
 	if err != nil {
@@ -110,7 +109,7 @@ func (selfDB *couchDB) invalidCluster() error {
 }
 
 // Lazy
-func (selfDB *couchDB) changeBucket(newBucket string) {
+func (selfDB *CouchDB) changeBucket(newBucket string) {
 	selfDB.Lock()
 	defer selfDB.Unlock()
 	selfDB.invalidBucket()
@@ -118,7 +117,7 @@ func (selfDB *couchDB) changeBucket(newBucket string) {
 }
 
 // Lazy
-func (selfDB *couchDB) changeScope(newScope string) {
+func (selfDB *CouchDB) changeScope(newScope string) {
 	selfDB.Lock()
 	defer selfDB.Unlock()
 	selfDB.invalidScope()
@@ -126,39 +125,31 @@ func (selfDB *couchDB) changeScope(newScope string) {
 }
 
 // Lazy
-func (selfDB *couchDB) changeCollection(newCollection string) {
+func (selfDB *CouchDB) changeCollection(newCollection string) {
 	selfDB.Lock()
 	defer selfDB.Unlock()
 	selfDB.invalidCollection()
 	selfDB.collectionName = newCollection
 }
 
-type conversation struct {
-	id          string
-	length      int
-	model       string
-	name        string
-	messages    []openai.ChatCompletionMessage // TODO : are these message able to be json ?
-	hasChange   bool
-	*sync.Mutex // TODO : how will it be store in json ?
-}
-
-func (selfDB *couchDB) getConversation(id string) (conversation, error) {
+func (selfDB *CouchDB) getConversation(id string) (Conversation, error) {
 	col, err := selfDB.getCollection()
 	if err != nil {
-		return conversation{}, nil
+		return Conversation{}, nil
 	}
 	res, err := col.Get(id, nil) // TODO : check possible option and api
 	if err != nil {
-		return conversation{}, err
+		return Conversation{}, err
 	}
-	conv := conversation{}
+	conv := Conversation{}
 	err = res.Content(&conv)
+	conv.hasChange = false // TODO : Should never be necessary since I already set that in storeConversation
 	return conv, err
 }
 
-func (selfDB *couchDB) storeConversation(conv *conversation) error {
+func (selfDB *CouchDB) storeConversation(conv *Conversation) error {
 	// TODO : upsert or insert ?
+	conv.hasChange = false
 	col, err := selfDB.getCollection()
 	if err != nil {
 		return err
@@ -167,8 +158,7 @@ func (selfDB *couchDB) storeConversation(conv *conversation) error {
 	return err
 }
 
-// TODO : couldn't I get only the id to avoid useless call ?
-func (selfDB *couchDB) getDocumentsID() ([]string, error) {
+func (selfDB *CouchDB) getDocumentsID() ([]string, error) {
 	scope, err := selfDB.getScope()
 	if err != nil {
 		return nil, err

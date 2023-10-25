@@ -7,8 +7,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/sashabaranov/go-openai"
-	"golang.org/x/text/language/display"
-	"io"
+	"os"
+	"sync"
 	"time"
 )
 
@@ -18,29 +18,70 @@ var (
 	// I prefer to keep the model simple and strict to the display
 	// but it generate global variable
 	// Also part of the conversation like message must be display
-	db = couchDB{
-		username: "admin",
-		password: "admin123",
+	db = CouchDB{
+		username:         "admin",
+		password:         "admin123",
 		connectionString: "localhost",
-		bucketName: "conversations",
-		scopeName: "_default",
-		collectionName: "_default",
+		bucketName:       "conversations",
+		scopeName:        "_default",
+		collectionName:   "_default",
 	}
-	currentConversation conversation
+	currentConversation Conversation
 
 	docStyle = lipgloss.NewStyle().Margin(1, 2)
 )
 
 type (
-	tickMsg struct{}
+	tickMsg  struct{}
 	frameMsg struct{}
+
+	Conversation struct {
+		id          string
+		length      int
+		model       string
+		name        string
+		messages    []openai.ChatCompletionMessage // TODO : are these message able to be json ?
+		hasChange   bool
+		*sync.Mutex // TODO : how will it be store in json ?
+	}
 )
 
-// MAIN SECTION
+// Run program
+
+func main() {
+	p := tea.NewProgram(initialModel())
+	if _, err := p.Run(); err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+}
+
+// MAIN MODEL
 
 type model struct {
-	mList modelList
-	mInput modelInput
+	mAI       modelAI
+	mConv     modelConv
+	mSystem   modelSystem
+	mQuestion modelQuestion
+	state     string
+	quitting  bool
+}
+
+func initialModel() model {
+	convModel, err := initialConversationModel()
+	if err != nil {
+		// TODO : handle error
+		return model{}
+	}
+	return model{
+		mAI:       initialModelAI(),
+		mConv:     convModel,
+		mSystem:   initialSystemModel(),
+		mQuestion: initialQuestionModel(),
+		state:     "ai",
+		quitting:  false,
+	}
+
 }
 
 func (m model) Init() tea.Cmd {
@@ -49,6 +90,47 @@ func (m model) Init() tea.Cmd {
 	})
 }
 
+func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if msg, ok := msg.(tea.KeyMsg); ok {
+		k := msg.String()
+		if k == "q" || k == "esc" || k == "ctrl+c" {
+			m.quitting = true
+			return m, tea.Quit
+		}
+	}
+
+	switch m.state {
+	case "ai":
+		return m.mAI.Update(msg)
+	case "conv":
+		return m.mConv.Update(msg)
+	case "system":
+		return m.mSystem.Update(msg)
+	case "question":
+		return m.mQuestion.Update(msg)
+	default:
+		// TODO : handle error
+		return nil, nil
+	}
+}
+
+func (m model) View() string {
+	if m.quitting {
+		return "\n See ya  !\n\n"
+	}
+	switch m.state {
+	case "ai":
+		return m.mAI.View()
+	case "conv":
+		return m.mConv.View()
+	case "system":
+		return m.mSystem.View()
+	case "question":
+		return m.mQuestion.View()
+	default:
+		return "Error happened, "
+	}
+}
 
 // Model and method for the AI selection
 
@@ -60,29 +142,83 @@ func (i item) FilterValue() string {
 	return i.title
 }
 
-type modelList struct {
-	list list.Model
+type modelAI struct {
+	list   list.Model
+	choice item
 }
 
-func initialModelAI() modelList {
+func initialModelAI() modelAI {
 	aiModels := []list.Item{
 		item{title: openai.GPT3Dot5Turbo, desc: "price placeholder"},
 		item{title: openai.GPT4, desc: "gpt4 placeholder"},
 	}
-	return modelList{
+	return modelAI{
 		list: list.New(aiModels, list.NewDefaultDelegate(), 0, 0),
 	}
 }
 
-func (m modelList) Init() tea.Cmd {
+func (m modelAI) Init() tea.Cmd {
 	return nil
 }
 
-func (m modelList) View() string {
+func (m modelAI) View() string {
 	return docStyle.Render(m.list.View())
 }
 
-func (m modelList) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m modelAI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "ctrl+c":
+			return m, tea.Quit // TODO : quitting bool ? Here or will be detected in main ? Maybe useless here
+		case "enter":
+			i, ok := m.list.SelectedItem().(item)
+			if ok {
+				m.choice = i
+			}
+			return m, tea.Quit
+
+		}
+	case tea.WindowSizeMsg:
+		h, v := docStyle.GetFrameSize()
+		m.list.SetSize(msg.Width-h, msg.Height-v)
+	}
+
+	var cmd tea.Cmd
+	m.list, cmd = m.list.Update(msg)
+	return m, cmd
+}
+
+// Model ond method for CONVERSATION CHOICE
+
+type modelConv struct {
+	list list.Model
+}
+
+func initialConversationModel() (modelConv, error) {
+	ids, err := db.getDocumentsID()
+	if err != nil {
+		return modelConv{}, err
+	}
+	idsItem := make([]list.Item, 2)
+	for _, id := range ids {
+		idsItem = append(idsItem, item{
+			title: id,
+			desc:  "",
+		})
+	}
+	return modelConv{list: list.New(idsItem, list.NewDefaultDelegate(), 0, 0)}, nil
+}
+
+func (m modelConv) Init() tea.Cmd {
+	return nil
+}
+
+func (m modelConv) View() string {
+	return docStyle.Render(m.list.View())
+}
+
+func (m modelConv) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		if msg.String() == "ctrl+c" {
@@ -98,59 +234,84 @@ func (m modelList) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-
-// Model ond method for CONVERSATION LOAD
-
-
-func initialConversationtModel() (modelList, error) {
-	ids, err := db.getDocumentsID()
-	if err != nil {
-		return modelList{}, err
-	}
-	idsItem := make([]list.Item, 2)
-	for _, id := range ids {
-		idsItem = append(idsItem, item{
-			title: id,
-			desc:  "",
-		})
-	}
-	return modelList{list:
-		list.New(idsItem, list.NewDefaultDelegate(), 0, 0)
-	}, nil
-}
-
 // Model and method for SYSTEM MESSAGE
 
-type modelInput struct {
+type modelSystem struct {
 	textInput textinput.Model
-	err error
+	err       error
 }
 
-func (m modelInput) View() string {
+func initialSystemModel() modelSystem {
+	ti := textinput.New()
+	ti.Placeholder = "Your are a helpful assistant."
+	ti.Focus()
+	ti.CharLimit = 512
+	ti.Width = 100
+	return modelSystem{
+		textInput: ti,
+	}
+}
+
+func (m modelSystem) Init() tea.Cmd {
+	return textinput.Blink
+}
+
+func (m modelSystem) View() string {
 	return fmt.Sprintf(
-		"Enter what you must enter\n\n%s\n\n%s",
-		// TODO split model and function for different message ?
+		"Enter system message \n\n%s\n\n%s",
 		m.textInput.View(),
 		"(esc to quit)",
 	) + "\n"
 }
 
-func (m modelInput) Init() tea.Cmd {
-	return textinput.Blink
+func (m modelSystem) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.Type {
+		case tea.KeyEnter, tea.KeyCtrlC, tea.KeyEsc:
+			return m, tea.Quit
+		}
+	case error:
+		m.err = msg
+		return m, nil
+	}
+	m.textInput, cmd = m.textInput.Update(msg)
+	return m, cmd
 }
 
-func initialSystemModel() modelInput {
+// Model and method for QUESTION
+
+type modelQuestion struct {
+	textInput textinput.Model
+	err       error
+}
+
+func initialQuestionModel() modelQuestion {
 	ti := textinput.New()
-	ti.Placeholder = "How do you do ?"
+	ti.Placeholder = "How do we cook meth ?"
 	ti.Focus()
 	ti.CharLimit = 512
 	ti.Width = 100
-	return modelInput{
+	return modelQuestion{
 		textInput: ti,
 	}
 }
 
-func (m modelInput) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m modelQuestion) Init() tea.Cmd {
+	return textinput.Blink
+}
+
+func (m modelQuestion) View() string {
+	return fmt.Sprintf(
+		"Enter your question \n\n%s\n\n%s",
+		m.textInput.View(),
+		"(esc to quit)",
+	) + "\n"
+}
+
+func (m modelQuestion) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
 	switch msg := msg.(type) {
