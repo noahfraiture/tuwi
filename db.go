@@ -1,30 +1,42 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"github.com/couchbase/gocb/v2"
+	"github.com/sashabaranov/go-openai"
 	"sync"
 	"time"
 )
 
-// CouchDB TODO : if I want to divide my db in multiple scope, I can divide this structure in multiple struct
-type CouchDB struct {
-	username         string
-	password         string
-	connectionString string
-	bucketName       string
-	scopeName        string
-	collectionName   string
-	cluster          *gocb.Cluster
-	bucket           *gocb.Bucket
-	scope            *gocb.Scope
-	collection       *gocb.Collection
-	sync.Mutex
-}
+type (
+	// Conversation TODO : Where should I put this shit ?
+	Conversation struct {
+		ID        string                         `json:"id"`
+		Model     string                         `json:"model"`
+		Name      string                         `json:"name"`
+		Messages  []openai.ChatCompletionMessage `json:"messages"` // TODO : are these message able to be json ?
+		HasChange bool                           `json:"has_change"`
+		*sync.Mutex
+	}
+
+	// CouchDB TODO : if I want to divide my db in multiple scope, I can divide this structure in multiple struct
+	CouchDB struct {
+		username         string
+		password         string
+		connectionString string
+		bucketName       string
+		scopeName        string
+		collectionName   string
+		cluster          *gocb.Cluster
+		bucket           *gocb.Bucket
+		scope            *gocb.Scope
+		collection       *gocb.Collection
+		sync.Mutex
+	}
+)
 
 func (selfDB *CouchDB) getCluster() (*gocb.Cluster, error) {
-	selfDB.Lock()
-	defer selfDB.Unlock()
 	if selfDB.cluster == nil {
 		cluster, err := gocb.Connect("couchbase://"+selfDB.connectionString, gocb.ClusterOptions{
 			Authenticator: gocb.PasswordAuthenticator{
@@ -41,8 +53,6 @@ func (selfDB *CouchDB) getCluster() (*gocb.Cluster, error) {
 }
 
 func (selfDB *CouchDB) getBucket() (*gocb.Bucket, error) {
-	selfDB.Lock()
-	defer selfDB.Unlock()
 	if selfDB.bucket == nil {
 		cluster, err := selfDB.getCluster()
 		if err != nil {
@@ -59,8 +69,6 @@ func (selfDB *CouchDB) getBucket() (*gocb.Bucket, error) {
 }
 
 func (selfDB *CouchDB) getScope() (*gocb.Scope, error) {
-	selfDB.Lock()
-	defer selfDB.Unlock()
 	if selfDB.scope == nil {
 		bucket, err := selfDB.getBucket()
 		if err != nil {
@@ -72,16 +80,32 @@ func (selfDB *CouchDB) getScope() (*gocb.Scope, error) {
 }
 
 func (selfDB *CouchDB) getCollection() (*gocb.Collection, error) {
-	selfDB.Lock()
-	defer selfDB.Unlock()
 	if selfDB.collection == nil {
 		scope, err := selfDB.getScope()
 		if err != nil {
 			return nil, err
 		}
 		selfDB.collection = scope.Collection(selfDB.collectionName)
+		// TODO : see how to handle non valid collection name
 	}
 	return selfDB.collection, nil
+}
+
+func (selfDB *CouchDB) Get(element string) (any, error) {
+	selfDB.Lock()
+	defer selfDB.Unlock()
+	switch element {
+	case "collection":
+		return selfDB.getCollection()
+	case "scope":
+		return selfDB.getScope()
+	case "bucket":
+		return selfDB.getBucket()
+	case "cluster":
+		return selfDB.getCluster()
+	default:
+		return nil, errors.New("wrong element in argument")
+	}
 }
 
 func (selfDB *CouchDB) invalidCollection() {
@@ -108,31 +132,65 @@ func (selfDB *CouchDB) invalidCluster() error {
 	return nil
 }
 
-// Lazy
-func (selfDB *CouchDB) changeBucket(newBucket string) {
+// Invalid TODO : not fan of element as a string
+func (selfDB *CouchDB) Invalid(element string) error {
 	selfDB.Lock()
 	defer selfDB.Unlock()
-	selfDB.invalidBucket()
-	selfDB.bucketName = newBucket
+	switch element {
+	case "cluster":
+		err := selfDB.invalidCluster()
+		if err != nil {
+			return err
+		}
+	case "bucket":
+		selfDB.invalidBucket()
+	case "scope":
+		selfDB.invalidScope()
+	case "collection":
+		selfDB.invalidCollection()
+	default:
+		return errors.New("wrong element in argument")
+	}
+	return nil
 }
 
-// Lazy
-func (selfDB *CouchDB) changeScope(newScope string) {
+// ChangeBucket Lazy
+func (selfDB *CouchDB) ChangeBucket(newBucket string) bool {
 	selfDB.Lock()
 	defer selfDB.Unlock()
-	selfDB.invalidScope()
-	selfDB.scopeName = newScope
+	if selfDB.bucketName != newBucket {
+		selfDB.invalidBucket()
+		selfDB.bucketName = newBucket
+		return true
+	}
+	return false
 }
 
-// Lazy
-func (selfDB *CouchDB) changeCollection(newCollection string) {
+// ChangeScope Lazy
+func (selfDB *CouchDB) ChangeScope(newScope string) bool {
 	selfDB.Lock()
 	defer selfDB.Unlock()
-	selfDB.invalidCollection()
-	selfDB.collectionName = newCollection
+	if selfDB.scopeName != newScope {
+		selfDB.invalidScope()
+		selfDB.scopeName = newScope
+		return true
+	}
+	return false
 }
 
-func (selfDB *CouchDB) getConversation(id string) (Conversation, error) {
+// ChangeCollection Lazy
+func (selfDB *CouchDB) ChangeCollection(newCollection string) bool {
+	selfDB.Lock()
+	defer selfDB.Unlock()
+	if selfDB.collectionName != newCollection {
+		selfDB.invalidCollection()
+		selfDB.collectionName = newCollection
+		return true
+	}
+	return false
+}
+
+func (selfDB *CouchDB) GetConversation(id string) (Conversation, error) {
 	col, err := selfDB.getCollection()
 	if err != nil {
 		return Conversation{}, nil
@@ -143,22 +201,25 @@ func (selfDB *CouchDB) getConversation(id string) (Conversation, error) {
 	}
 	conv := Conversation{}
 	err = res.Content(&conv)
-	conv.hasChange = false // TODO : Should never be necessary since I already set that in storeConversation
+	if conv.HasChange {
+		conv.HasChange = false
+		err = errors.Join(err, errors.New("conversation has change value to true"))
+	}
 	return conv, err
 }
 
-func (selfDB *CouchDB) storeConversation(conv *Conversation) error {
+func (selfDB *CouchDB) StoreConversation(conv *Conversation) error {
 	// TODO : upsert or insert ?
-	conv.hasChange = false
 	col, err := selfDB.getCollection()
 	if err != nil {
 		return err
 	}
-	_, err = col.Upsert(conv.id, conv, nil) // TODO : what about mutation returned value
+	_, err = col.Upsert(conv.ID, conv, nil) // TODO : what about mutation returned value
+	conv.HasChange = false
 	return err
 }
 
-func (selfDB *CouchDB) getDocumentsID() ([]string, error) {
+func (selfDB *CouchDB) GetDocumentsID() ([]string, error) {
 	scope, err := selfDB.getScope()
 	if err != nil {
 		return nil, err
@@ -167,17 +228,23 @@ func (selfDB *CouchDB) getDocumentsID() ([]string, error) {
 		fmt.Sprintf("SELECT META().id FROM %s", selfDB.collectionName),
 		&gocb.QueryOptions{},
 	)
+	defer func(queryRes *gocb.QueryResult) {
+		err = queryRes.Close()
+	}(queryRes)
 	if err != nil {
 		return nil, err
 	}
-	idList := make([]string, 8)
+
+	idList := make([]string, 0)
 	for queryRes.Next() {
-		var tmpID string
+		var tmpID struct {
+			ID string `json:"id"`
+		}
 		err = queryRes.Row(&tmpID)
 		if err != nil {
 			return nil, err
 		}
-		idList = append(idList, tmpID)
+		idList = append(idList, tmpID.ID)
 	}
 	return idList, nil
 }

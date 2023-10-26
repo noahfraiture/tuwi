@@ -2,43 +2,39 @@ package main
 
 import (
 	"context"
-	"fmt"
 	openai "github.com/sashabaranov/go-openai"
 	"os"
 	"sync"
 )
 
 type Key struct {
-	key   string
-	mutex sync.Mutex
+	Key string
+	sync.Mutex
 }
 
 var key = Key{}
 
-func getKey() (string, error) {
-	key.mutex.Lock()
-	defer key.mutex.Unlock()
-	if key.key == "" {
+func GetKey() (string, error) {
+	key.Lock()
+	defer key.Unlock()
+	if key.Key == "" {
 		dat, err := os.ReadFile("key")
 		if err != nil {
 			return "", err
 		}
-		key.key = string(dat)
-		fmt.Print("Key loaded") // TODO : remove key
+		key.Key = string(dat)
 	}
-	return key.key, nil
+	return key.Key, nil
 }
 
-// TODO : invalid key on every error or need change
-func (key *Key) invalid() bool {
-	key.mutex.Lock()
-	defer key.mutex.Unlock()
-	ok := true
-	if key.key == "" {
-		ok = false
+// Invalid TODO : Invalid key on every error or need change
+// Should never be used outside a function with a malloc
+func (key *Key) Invalid() bool {
+	if key.Key == "" {
+		return false
 	}
-	key.key = ""
-	return ok
+	key.Key = ""
+	return true
 }
 
 type OpenClient struct {
@@ -48,11 +44,11 @@ type OpenClient struct {
 
 var openClient = OpenClient{}
 
-func getClient() (*openai.Client, error) {
+func GetClient() (*openai.Client, error) {
 	openClient.mutex.Lock()
 	defer openClient.mutex.Unlock()
 	if openClient.client == nil {
-		key, err := getKey()
+		key, err := GetKey()
 		if err != nil {
 			return nil, err
 		}
@@ -61,7 +57,7 @@ func getClient() (*openai.Client, error) {
 	return openClient.client, nil
 }
 
-func (openClient *OpenClient) invalid() bool {
+func (openClient *OpenClient) Invalid() bool {
 	openClient.mutex.Lock()
 	defer openClient.mutex.Unlock()
 	ok := true
@@ -72,8 +68,8 @@ func (openClient *OpenClient) invalid() bool {
 	return ok
 }
 
-func (mes *Conversation) chatCompletion(question string, model string) (openai.FinishReason, error) {
-	client, err := getClient()
+func (selfDoc *Conversation) ChatCompletion(question string) (openai.FinishReason, error) {
+	client, err := GetClient()
 	if err != nil {
 		return "", err
 	}
@@ -83,20 +79,25 @@ func (mes *Conversation) chatCompletion(question string, model string) (openai.F
 		Role:    openai.ChatMessageRoleUser,
 		Content: question,
 	}
-	mes.messages = append(mes.messages, newQuestion)
-	mes.hasChange = true
 
 	req := openai.ChatCompletionRequest{
-		Model:     model,
+		Model:     selfDoc.Model,
 		MaxTokens: 20, // TODO : edit hyper parameters
-		Messages:  mes.messages,
+		Messages:  append(selfDoc.Messages, newQuestion),
 		Stream:    false,
 	}
 
 	resp, err := client.CreateChatCompletion(ctx, req)
+	if err != nil {
+		return "", err
+	}
+
+	// TODO : In which case it should not store the question and the answer ?
+	selfDoc.Messages = append(selfDoc.Messages, newQuestion)
+	selfDoc.Messages = append(selfDoc.Messages, resp.Choices[0].Message)
+	selfDoc.HasChange = true
 
 	// Todo : is there a choices 0 in case of err ?
 	// TODO : we add the messages to the struct but don't return it
-	mes.messages = append(mes.messages, resp.Choices[0].Message)
 	return resp.Choices[0].FinishReason, err
 }

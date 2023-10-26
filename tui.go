@@ -8,7 +8,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/sashabaranov/go-openai"
 	"os"
-	"sync"
 	"time"
 )
 
@@ -34,16 +33,6 @@ var (
 type (
 	tickMsg  struct{}
 	frameMsg struct{}
-
-	Conversation struct {
-		id          string
-		length      int
-		model       string
-		name        string
-		messages    []openai.ChatCompletionMessage // TODO : are these message able to be json ?
-		hasChange   bool
-		*sync.Mutex // TODO : how will it be store in json ?
-	}
 )
 
 // Run program
@@ -57,6 +46,7 @@ func main() {
 }
 
 // MAIN MODEL
+// TODO : could use factory to remove duplicate code ?
 
 type model struct {
 	mAI       modelAI
@@ -152,7 +142,7 @@ type modelConv struct {
 }
 
 func initialConversationModel() (modelConv, error) {
-	ids, err := db.getDocumentsID()
+	ids, err := db.GetDocumentsID()
 	if err != nil {
 		return modelConv{}, err
 	}
