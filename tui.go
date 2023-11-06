@@ -9,16 +9,19 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/sashabaranov/go-openai"
+	"math/rand"
 	"os"
 	"strings"
 	"time"
 )
 
 const (
-	AI     = "ai"
-	CONV   = "conv"
-	SYSTEM = "system"
-	CHAT   = "chat"
+	AI      = "ai"
+	CONV    = "conv"
+	SYSTEM  = "system"
+	CHAT    = "chat"
+	NEWCONV = "newconv"
 )
 
 // TODO : decide if conversation and DB are store here or in the model
@@ -40,6 +43,9 @@ type (
 		db          CouchDB
 		docStyle    lipgloss.Style
 		senderStyle lipgloss.Style
+		redStyle    lipgloss.Style
+		greenStyle  lipgloss.Style
+		yellowStyle lipgloss.Style
 		err         error
 		state       string
 		quitting    bool
@@ -64,7 +70,7 @@ type (
 		viewport     viewport.Model
 		textarea     textarea.Model
 		messages     []string
-		conversation Conversation
+		conversation *Conversation
 	}
 
 	aiVersion struct {
@@ -116,6 +122,9 @@ func initialModel() model {
 
 		docStyle:    lipgloss.NewStyle().Margin(1, 2),
 		senderStyle: lipgloss.NewStyle().Foreground(lipgloss.Color("5")),
+		redStyle:    lipgloss.NewStyle().Foreground(lipgloss.Color("1")),
+		greenStyle:  lipgloss.NewStyle().Foreground(lipgloss.Color("2")),
+		yellowStyle: lipgloss.NewStyle().Foreground(lipgloss.Color("3")),
 		state:       CONV,
 		quitting:    false,
 	}
@@ -204,10 +213,28 @@ func (m model) viewConv() string {
 }
 
 func (m model) updateConv(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if msg, ok := msg.(tea.KeyMsg); ok && msg.Type == tea.KeyEnter {
-		if i, ok := m.conv.list.SelectedItem().(itemConv); ok {
+
+	if msg, ok := msg.(tea.KeyMsg); ok {
+		switch msg.Type {
+		case tea.KeyEnter:
+			if i, ok := m.conv.list.SelectedItem().(itemConv); ok {
+				m.state = AI
+				m.conv.choice = (*Conversation)(&i) // TODO : does the conversation loose data ?
+			}
+		case tea.KeyBackspace:
+			randomBytes := make([]rune, 8)
+			var letterRunes = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+			for i := range randomBytes {
+				randomBytes[i] = letterRunes[rand.Intn(len(letterRunes))]
+			}
 			m.state = AI
-			m.conv.choice = (*Conversation)(&i) // TODO : does the conversation loose data ?
+			m.chat.conversation = &Conversation{
+				ID:        string(randomBytes),
+				Model:     "",
+				Name:      "",
+				Messages:  nil,
+				HasChange: false,
+			}
 		}
 	}
 
@@ -219,9 +246,9 @@ func (m model) updateConv(msg tea.Msg) (tea.Model, tea.Cmd) {
 func initialAI() aiModel {
 	return aiModel{
 		list: list.New([]list.Item{
-			aiVersion{title: "ai1",
+			aiVersion{title: openai.GPT4,
 				desc: "placeholder"},
-			aiVersion{title: "ai2",
+			aiVersion{title: openai.GPT3Dot5Turbo,
 				desc: "placeholder"},
 		}, list.NewDefaultDelegate(), 0, 0),
 		choice: nil,
@@ -237,6 +264,7 @@ func (m model) updateAI(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if i, ok := m.ai.list.SelectedItem().(aiVersion); ok {
 			m.state = SYSTEM
 			m.ai.choice = &i
+			m.chat.conversation.Model = i.title
 		}
 	}
 
@@ -272,8 +300,15 @@ func (m model) updateSystem(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.Type {
 		case tea.KeyEnter:
-			m.system.content = m.system.texting.Value()
 			m.state = CHAT
+			m.system.content = m.system.texting.Value()
+			if m.system.content == "" {
+				m.system.content = "You are a helpful assistant"
+			}
+			m.chat.conversation.Messages = append(m.chat.conversation.Messages, openai.ChatCompletionMessage{
+				Role:    openai.ChatMessageRoleSystem,
+				Content: m.system.content,
+			})
 		}
 	case error:
 		m.err = msg
@@ -298,7 +333,7 @@ func initialChat() chatModel {
 	ta.SetHeight(3)
 
 	return chatModel{
-		conversation: Conversation{},
+		conversation: nil,
 		viewport:     vp,
 		textarea:     ta,
 		messages:     []string{},
@@ -322,6 +357,21 @@ func (m model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case tea.KeyEnter:
 			m.chat.messages = append(m.chat.messages, m.senderStyle.Render("You: ")+m.chat.textarea.Value())
+
+			finishReason, err := m.chat.conversation.ChatCompletion(m.chat.textarea.Value())
+			if err != nil {
+				m.err = err
+				return m, nil
+			}
+			switch finishReason {
+			case openai.FinishReasonStop:
+				m.chat.messages = append(m.chat.messages, m.greenStyle.Render("Bot : ")+m.chat.conversation.Messages[len(m.chat.conversation.Messages)-1].Content)
+			case openai.FinishReasonLength:
+				m.chat.messages = append(m.chat.messages, m.yellowStyle.Render("Bot : ")+m.chat.conversation.Messages[len(m.chat.conversation.Messages)-1].Content)
+			case openai.FinishReasonContentFilter:
+				m.chat.messages = append(m.chat.messages, m.redStyle.Render("Bot : ")+m.chat.conversation.Messages[len(m.chat.conversation.Messages)-1].Content)
+
+			}
 			m.chat.viewport.SetContent(strings.Join(m.chat.messages, "\n"))
 			m.chat.textarea.Reset()
 			m.chat.viewport.GotoBottom()

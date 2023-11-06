@@ -38,7 +38,7 @@ var (
 		username:         "admin",
 		password:         "admin123",
 		connectionString: "localhost",
-		bucketName:       "test",
+		bucketName:       "conversations",
 		scopeName:        "_default",
 		collectionName:   "_default",
 		cluster:          nil,
