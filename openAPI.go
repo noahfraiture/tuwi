@@ -2,64 +2,53 @@ package main
 
 import (
 	"context"
-	openai "github.com/sashabaranov/go-openai"
+	"github.com/sashabaranov/go-openai"
 	"os"
-	"sync"
 )
 
-type Key struct {
-	Key string
-	sync.Mutex
-}
+type Key string
 
-var key = Key{}
+var key Key = ""
 
-func GetKey() (string, error) {
-	key.Lock()
-	defer key.Unlock()
-	if key.Key == "" {
+func GetKey() (Key, error) {
+	if key == "" {
 		dat, err := os.ReadFile("key")
 		if err != nil {
 			return "", err
 		}
-		key.Key = string(dat)
+		key = Key(dat)
 	}
-	return key.Key, nil
+	return key, nil
 }
 
 // Invalid TODO : Invalid key on every error or need change
 // Should never be used outside a function with a malloc
 func (key *Key) Invalid() bool {
-	if key.Key == "" {
+	if *key == "" {
 		return false
 	}
-	key.Key = ""
+	*key = ""
 	return true
 }
 
 type OpenClient struct {
 	client *openai.Client
-	mutex  sync.Mutex
 }
 
 var openClient = OpenClient{}
 
 func GetClient() (*openai.Client, error) {
-	openClient.mutex.Lock()
-	defer openClient.mutex.Unlock()
 	if openClient.client == nil {
 		key, err := GetKey()
 		if err != nil {
 			return nil, err
 		}
-		openClient.client = openai.NewClient(key)
+		openClient.client = openai.NewClient(string(key))
 	}
 	return openClient.client, nil
 }
 
 func (openClient *OpenClient) Invalid() bool {
-	openClient.mutex.Lock()
-	defer openClient.mutex.Unlock()
 	ok := true
 	if openClient.client == nil {
 		ok = false
@@ -68,7 +57,7 @@ func (openClient *OpenClient) Invalid() bool {
 	return ok
 }
 
-func (selfDoc *Conversation) ChatCompletion(question string) (openai.FinishReason, error) {
+func (conv *Conversation) ChatCompletion(question string) (openai.FinishReason, error) {
 	client, err := GetClient()
 	if err != nil {
 		return "", err
@@ -81,9 +70,9 @@ func (selfDoc *Conversation) ChatCompletion(question string) (openai.FinishReaso
 	}
 
 	req := openai.ChatCompletionRequest{
-		Model:     selfDoc.Model,
+		Model:     conv.Model,
 		MaxTokens: 20, // TODO : edit hyper parameters
-		Messages:  append(selfDoc.Messages, newQuestion),
+		Messages:  append(conv.Messages, newQuestion),
 		Stream:    false,
 	}
 
@@ -93,9 +82,9 @@ func (selfDoc *Conversation) ChatCompletion(question string) (openai.FinishReaso
 	}
 
 	// TODO : In which case it should not store the question and the answer ?
-	selfDoc.Messages = append(selfDoc.Messages, newQuestion)
-	selfDoc.Messages = append(selfDoc.Messages, resp.Choices[0].Message)
-	selfDoc.HasChange = true
+	conv.Messages = append(conv.Messages, newQuestion)
+	conv.Messages = append(conv.Messages, resp.Choices[0].Message)
+	conv.HasChange = true
 
 	// Todo : is there a choices 0 in case of err ?
 	// TODO : we add the messages to the struct but don't return it

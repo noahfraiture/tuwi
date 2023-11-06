@@ -88,7 +88,6 @@ var (
 		Name:      "jon",
 		Messages:  nil,
 		HasChange: false,
-		Mutex:     nil,
 	}
 
 	c1 document = &Conversation{
@@ -125,8 +124,8 @@ func (selfDoc *docSimp) getID() string {
 	return selfDoc.ID
 }
 
-func (selfDoc *Conversation) getID() string {
-	return selfDoc.ID
+func (conv *Conversation) getID() string {
+	return conv.ID
 }
 
 func (selfDoc *docMut) getName() string {
@@ -137,8 +136,8 @@ func (selfDoc *docSimp) getName() string {
 	return selfDoc.Name
 }
 
-func (selfDoc *Conversation) getName() string {
-	return selfDoc.Name
+func (conv *Conversation) getName() string {
+	return conv.Name
 }
 
 func (selfDoc *docMut) getNumber() float64 {
@@ -149,7 +148,7 @@ func (selfDoc *docSimp) getNumber() float64 {
 	return selfDoc.Number
 }
 
-func (selfDoc *Conversation) getNumber() float64 {
+func (conv *Conversation) getNumber() float64 {
 	return 0
 }
 
@@ -161,7 +160,7 @@ func (selfDoc *docSimp) getNotInDoc() string {
 	return selfDoc.NotInDoc
 }
 
-func (selfDoc *Conversation) getNotInDoc() string {
+func (conv *Conversation) getNotInDoc() string {
 	return ""
 }
 
@@ -297,18 +296,6 @@ func TestCouchDB_InvalidCluster(t *testing.T) {
 	}
 }
 
-func TestMutex(t *testing.T) {
-	type mut struct {
-		id string
-		sync.Mutex
-	}
-	m0 := mut{
-		id: "m0",
-	}
-	m0.Lock()
-	defer m0.Unlock()
-}
-
 func addDoc(docs ...document) error {
 	col, err := dbTest.getCollection()
 	if err != nil {
@@ -396,6 +383,7 @@ func TestCouchDB_GetDocumentsID(t *testing.T) {
 	}
 }
 
+// Change for test2
 func TestCouchDB_ChangeBucket(t *testing.T) {
 	_, err := dbTest.getCollection()
 	if err != nil {
@@ -419,27 +407,35 @@ func TestCouchDB_AddConv(t *testing.T) {
 
 // Test for conv are not necessary, hand works
 
-func clearDB() {
+func Test_Clear(t *testing.T) {
 	dbTest.ChangeBucket("test")
 	col, err := dbTest.getCollection()
 	if err != nil {
-		return
+		t.Error(err)
 	}
-	for _, id := range listID {
+	ids, err := dbTest.GetDocumentsID()
+	if err != nil {
+		t.Error(err)
+	}
+	for _, id := range ids {
 		_, err = col.Remove(id, nil)
 		if err != nil {
-			return
+			t.Error(err)
 		}
 	}
 	dbTest.ChangeBucket("test2")
 	col, err = dbTest.getCollection()
 	if err != nil {
-		return
+		t.Error(err)
 	}
-	for _, id := range listID {
+	ids, err = dbTest.GetDocumentsID()
+	if err != nil {
+		t.Error(err)
+	}
+	for _, id := range ids {
 		_, err = col.Remove(id, nil)
 		if err != nil {
-			return
+			t.Error(err)
 		}
 	}
 }

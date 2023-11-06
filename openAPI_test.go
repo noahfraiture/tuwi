@@ -34,7 +34,7 @@ func TestKey_Invalid(t *testing.T) {
 	if res := key.Invalid(); res {
 		t.Error("The key plain after an invalidation")
 	}
-	if key.Key != "" {
+	if string(key) != "" {
 		t.Error("How tf is it not empty now ?")
 	}
 }
@@ -113,13 +113,13 @@ func TestConversation_ChatCompletion_Full(t *testing.T) {
 		},
 		HasChange: false,
 	}
-	finishReason, err := conversation.ChatCompletion("You fine?")
+	finishReason, err := conversation.ChatCompletion("Say 'banana'")
 	if err != nil {
 		t.Error(err)
 	}
 	fmt.Printf("The response : %s\n", conversation.Messages[len(conversation.Messages)-1].Content)
 	if finishReason != openai.FinishReasonStop {
-		t.Error("The conversation should have stopped")
+		t.Errorf("The conversation should have stopped : %s", finishReason)
 	}
 	if len(conversation.Messages) != 5 {
 		t.Error("The conversation should have 5 messages")

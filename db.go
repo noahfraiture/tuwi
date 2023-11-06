@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"github.com/couchbase/gocb/v2"
 	"github.com/sashabaranov/go-openai"
-	"sync"
 	"time"
 )
 
@@ -17,7 +16,6 @@ type (
 		Name      string                         `json:"name"`
 		Messages  []openai.ChatCompletionMessage `json:"messages"` // TODO : are these message able to be json ?
 		HasChange bool                           `json:"has_change"`
-		*sync.Mutex
 	}
 
 	// CouchDB TODO : if I want to divide my db in multiple scope, I can divide this structure in multiple struct
@@ -32,7 +30,6 @@ type (
 		bucket           *gocb.Bucket
 		scope            *gocb.Scope
 		collection       *gocb.Collection
-		sync.Mutex
 	}
 )
 
@@ -92,8 +89,6 @@ func (selfDB *CouchDB) getCollection() (*gocb.Collection, error) {
 }
 
 func (selfDB *CouchDB) Get(element string) (any, error) {
-	selfDB.Lock()
-	defer selfDB.Unlock()
 	switch element {
 	case "collection":
 		return selfDB.getCollection()
@@ -134,8 +129,6 @@ func (selfDB *CouchDB) invalidCluster() error {
 
 // Invalid TODO : not fan of element as a string
 func (selfDB *CouchDB) Invalid(element string) error {
-	selfDB.Lock()
-	defer selfDB.Unlock()
 	switch element {
 	case "cluster":
 		err := selfDB.invalidCluster()
@@ -156,8 +149,6 @@ func (selfDB *CouchDB) Invalid(element string) error {
 
 // ChangeBucket Lazy
 func (selfDB *CouchDB) ChangeBucket(newBucket string) bool {
-	selfDB.Lock()
-	defer selfDB.Unlock()
 	if selfDB.bucketName != newBucket {
 		selfDB.invalidBucket()
 		selfDB.bucketName = newBucket
@@ -168,8 +159,6 @@ func (selfDB *CouchDB) ChangeBucket(newBucket string) bool {
 
 // ChangeScope Lazy
 func (selfDB *CouchDB) ChangeScope(newScope string) bool {
-	selfDB.Lock()
-	defer selfDB.Unlock()
 	if selfDB.scopeName != newScope {
 		selfDB.invalidScope()
 		selfDB.scopeName = newScope
@@ -180,8 +169,6 @@ func (selfDB *CouchDB) ChangeScope(newScope string) bool {
 
 // ChangeCollection Lazy
 func (selfDB *CouchDB) ChangeCollection(newCollection string) bool {
-	selfDB.Lock()
-	defer selfDB.Unlock()
 	if selfDB.collectionName != newCollection {
 		selfDB.invalidCollection()
 		selfDB.collectionName = newCollection
@@ -247,4 +234,19 @@ func (selfDB *CouchDB) GetDocumentsID() ([]string, error) {
 		idList = append(idList, tmpID.ID)
 	}
 	return idList, nil
+}
+
+func (selfDB *CouchDB) GetConversations() ([]Conversation, error) {
+	idList, err := selfDB.GetDocumentsID()
+	if err != nil {
+		return nil, err
+	}
+	convList := make([]Conversation, len(idList))
+	for i, id := range idList {
+		convList[i], err = selfDB.GetConversation(id)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return convList, nil
 }

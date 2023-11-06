@@ -1,39 +1,91 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/sashabaranov/go-openai"
 	"os"
+	"strings"
 	"time"
 )
 
-var (
-
-	// TODO : decide if conversation and DB are store here or in the model
-	// I prefer to keep the model simple and strict to the display
-	// but it generate global variable
-	// Also part of the conversation like message must be display
-	db = CouchDB{
-		username:         "admin",
-		password:         "admin123",
-		connectionString: "localhost",
-		bucketName:       "conversations",
-		scopeName:        "_default",
-		collectionName:   "_default",
-	}
-	currentConversation Conversation
-
-	docStyle = lipgloss.NewStyle().Margin(1, 2)
+const (
+	AI     = "ai"
+	CONV   = "conv"
+	SYSTEM = "system"
+	CHAT   = "chat"
 )
+
+// TODO : decide if conversation and DB are store here or in the model
+// I prefer to keep the model simple and strict to the display
+// but it generate global variable
+// Also part of the conversation like message must be display
 
 type (
-	tickMsg  struct{}
-	frameMsg struct{}
+	tickMsg struct{}
+
+	// MAIN MODEL
+	// TODO : could use factory to remove duplicate code ?
+	model struct {
+		conv   convModel
+		ai     aiModel
+		system systemModel
+		chat   chatModel
+
+		db          CouchDB
+		docStyle    lipgloss.Style
+		senderStyle lipgloss.Style
+		err         error
+		state       string
+		quitting    bool
+	}
+
+	convModel struct {
+		list   list.Model
+		choice *Conversation
+	}
+
+	aiModel struct {
+		list   list.Model
+		choice *aiVersion
+	}
+
+	systemModel struct {
+		texting textinput.Model
+		content string
+	}
+
+	chatModel struct {
+		viewport     viewport.Model
+		textarea     textarea.Model
+		messages     []string
+		conversation Conversation
+	}
+
+	aiVersion struct {
+		title, desc string
+	}
+	itemConv Conversation
 )
+
+func (conv itemConv) Title() string {
+	return conv.Name
+}
+func (conv itemConv) Description() string {
+	return conv.ID
+}
+func (conv itemConv) FilterValue() string {
+	return conv.Name
+}
+
+func (i aiVersion) Title() string       { return i.title }
+func (i aiVersion) Description() string { return i.desc }
+func (i aiVersion) FilterValue() string { return i.title }
 
 // Run program
 
@@ -45,31 +97,27 @@ func main() {
 	}
 }
 
-// MAIN MODEL
-// TODO : could use factory to remove duplicate code ?
-
-type model struct {
-	mAI       modelAI
-	mConv     modelConv
-	mSystem   modelSystem
-	mQuestion modelQuestion
-	state     string
-	quitting  bool
-}
-
 func initialModel() model {
-	convModel, err := initialConversationModel()
-	if err != nil {
-		// TODO : handle error
-		return model{}
+	db := CouchDB{
+		username:         "admin",
+		password:         "admin123",
+		connectionString: "localhost",
+		bucketName:       "test",
+		scopeName:        "_default",
+		collectionName:   "_default",
 	}
 	return model{
-		mAI:       initialModelAI(),
-		mConv:     convModel,
-		mSystem:   initialSystemModel(),
-		mQuestion: initialQuestionModel(),
-		state:     "ai",
-		quitting:  false,
+		conv:   initialConv(&db),
+		ai:     initialAI(),
+		system: initialSystem(),
+		chat:   initialChat(),
+
+		db: db,
+
+		docStyle:    lipgloss.NewStyle().Margin(1, 2),
+		senderStyle: lipgloss.NewStyle().Foreground(lipgloss.Color("5")),
+		state:       CONV,
+		quitting:    false,
 	}
 
 }
@@ -80,35 +128,38 @@ func (m model) Init() tea.Cmd {
 	})
 }
 
+// Update TODO : it seems that display two list one after the other doesn't work
+// ai -> conv or conv -> ai is same shit
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if msg, ok := msg.(tea.KeyMsg); ok { // TODO : change that shit
+
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
 		switch msg.Type {
-		case tea.KeyCtrlC, tea.KeyEsc:
+		case tea.KeyEsc, tea.KeyCtrlC:
 			m.quitting = true
 			return m, tea.Quit
 		}
+		break
+	case tea.WindowSizeMsg:
+		h, v := m.docStyle.GetFrameSize()
+		m.conv.list.SetSize(msg.Width-h, msg.Height-v)
+		m.ai.list.SetSize(msg.Width-h, msg.Height-v)
+		break
 	}
 
 	switch m.state {
-	case "conv":
-		tmpModel, tmpCmd := m.mConv.Update(msg)
-		if m.mConv.choice != nil {
-			m.state = "ai"
-		}
-		return tmpModel, tmpCmd
-	case "ai": // choose the model of AI for new conversation
-		tmpModel, tmpCmd := m.mAI.Update(msg)
-		if m.mAI.choice != nil {
-			m.state = "system"
-		}
-		return tmpModel, tmpCmd
-	case "system":
-		return m.mSystem.Update(msg)
-	case "question":
-		return m.mQuestion.Update(msg)
+	case CONV:
+		return m.updateConv(msg)
+	case AI:
+		return m.updateAI(msg)
+	case SYSTEM:
+		return m.updateSystem(msg)
+	case CHAT:
+		return m.updateChat(msg)
 	default:
-		// TODO : handle error
-		return nil, nil
+		m.err = errors.New("State doesn't exist\n")
+		println(m.err)
+		return m, tea.Quit
 	}
 }
 
@@ -117,223 +168,178 @@ func (m model) View() string {
 		return "\n See ya  !\n\n"
 	}
 	switch m.state {
-	case "ai":
-		return m.mAI.View()
-	case "conv":
-		return m.mConv.View()
-	case "system":
-		return m.mSystem.View()
-	case "question":
-		return m.mQuestion.View()
+	case CONV:
+		return m.viewConv()
+	case AI:
+		return m.viewAI()
+	case SYSTEM:
+		return m.viewSystem()
+	case CHAT:
+		return m.viewChat()
 	default:
-		return "Error happened, "
+		return "State doesn't exist\n"
 	}
 }
 
-// Model ond method for CONVERSATION CHOICE
-
-type item struct {
-	title, desc string
-}
-
-type modelConv struct {
-	list   list.Model
-	choice *item
-}
-
-func initialConversationModel() (modelConv, error) {
-	ids, err := db.GetDocumentsID()
-	if err != nil {
-		return modelConv{}, err
-	}
-	idsItem := make([]list.Item, 2)
-	for _, id := range ids {
-		idsItem = append(idsItem, item{
-			title: id,
-			desc:  "",
-		})
-	}
-	return modelConv{list: list.New(idsItem, list.NewDefaultDelegate(), 0, 0)}, nil
-}
-
-func (m modelConv) Init() tea.Cmd {
-	return nil
-}
-
-func (m modelConv) View() string {
-	return docStyle.Render(m.list.View())
-}
-
-func (m modelConv) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch msg.Type {
-		case tea.KeyEnter:
-			i, ok := m.list.SelectedItem().(item)
-			if ok {
-				m.choice = &i
-			}
-		case tea.KeyCtrlC, tea.KeyEsc:
-			return m, tea.Quit
+func initialConv(db *CouchDB) convModel {
+	if listConv, err := db.GetConversations(); err != nil {
+		return convModel{
+			list:   list.New([]list.Item{}, list.NewDefaultDelegate(), 0, 0),
+			choice: nil,
 		}
-	case tea.WindowSizeMsg:
-		h, v := docStyle.GetFrameSize()
-		m.list.SetSize(msg.Width-h, msg.Height-v)
+	} else {
+		listItemConv := make([]list.Item, len(listConv))
+		for i, conv := range listConv {
+			listItemConv[i] = itemConv(conv)
+		}
+		return convModel{
+			list:   list.New(listItemConv, list.NewDefaultDelegate(), 0, 0),
+			choice: nil,
+		}
+	}
+}
+
+func (m model) viewConv() string {
+	return m.docStyle.Render(m.conv.list.View())
+}
+
+func (m model) updateConv(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if msg, ok := msg.(tea.KeyMsg); ok && msg.Type == tea.KeyEnter {
+		if i, ok := m.conv.list.SelectedItem().(itemConv); ok {
+			m.state = AI
+			m.conv.choice = (*Conversation)(&i) // TODO : does the conversation loose data ?
+		}
 	}
 
 	var cmd tea.Cmd
-	m.list, cmd = m.list.Update(msg)
+	m.conv.list, cmd = m.conv.list.Update(msg)
 	return m, cmd
 }
 
-// Model and method for the AI selection
-// TODO : really duplicate with conversation section, is there a necessity to split them ?
-
-func (i item) FilterValue() string {
-	return i.title
-}
-
-type modelAI struct {
-	list   list.Model
-	choice *item
-}
-
-func initialModelAI() modelAI {
-	aiModels := []list.Item{
-		item{title: openai.GPT3Dot5Turbo, desc: "price placeholder"},
-		item{title: openai.GPT4, desc: "gpt4 placeholder"},
-	}
-	return modelAI{
-		list: list.New(aiModels, list.NewDefaultDelegate(), 0, 0),
+func initialAI() aiModel {
+	return aiModel{
+		list: list.New([]list.Item{
+			aiVersion{title: "ai1",
+				desc: "placeholder"},
+			aiVersion{title: "ai2",
+				desc: "placeholder"},
+		}, list.NewDefaultDelegate(), 0, 0),
+		choice: nil,
 	}
 }
 
-func (m modelAI) Init() tea.Cmd {
-	return nil
+func (m model) viewAI() string {
+	return m.docStyle.Render(m.ai.list.View())
 }
 
-func (m modelAI) View() string {
-	return docStyle.Render(m.list.View())
-}
-
-func (m modelAI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch msg.Type {
-		case tea.KeyEnter:
-			i, ok := m.list.SelectedItem().(item)
-			if ok {
-				m.choice = &i
-			}
-		case tea.KeyCtrlC, tea.KeyEsc:
-			return m, tea.Quit // TODO : quitting bool ? Here or will be detected in main ? Should never be reached
+func (m model) updateAI(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if msg, ok := msg.(tea.KeyMsg); ok && msg.Type == tea.KeyEnter {
+		if i, ok := m.ai.list.SelectedItem().(aiVersion); ok {
+			m.state = SYSTEM
+			m.ai.choice = &i
 		}
-	case tea.WindowSizeMsg:
-		h, v := docStyle.GetFrameSize()
-		m.list.SetSize(msg.Width-h, msg.Height-v)
 	}
 
 	var cmd tea.Cmd
-	m.list, cmd = m.list.Update(msg)
+	m.ai.list, cmd = m.ai.list.Update(msg)
 	return m, cmd
 }
 
-// Model and method for SYSTEM MESSAGE
-
-type modelSystem struct {
-	textInput textinput.Model
-	content   string
-	err       error
-}
-
-func initialSystemModel() modelSystem {
-	ti := textinput.New()
-	ti.Placeholder = "Your are a helpful assistant."
-	ti.Focus()
-	ti.CharLimit = 512
-	ti.Width = 100
-	return modelSystem{
-		textInput: ti,
+func initialSystem() systemModel {
+	it := textinput.New()
+	it.Placeholder = "You are a helpful assistant"
+	it.CharLimit = 156
+	it.Width = 20
+	it.Focus() // TODO : has the order any importance ?
+	return systemModel{
+		texting: it,
+		content: "",
 	}
 }
 
-func (m modelSystem) Init() tea.Cmd {
-	return textinput.Blink
-}
-
-func (m modelSystem) View() string {
+func (m model) viewSystem() string {
 	return fmt.Sprintf(
 		"Enter system message \n\n%s\n\n%s",
-		m.textInput.View(),
+		m.system.texting.View(),
 		"(esc to quit)",
 	) + "\n"
 }
 
-func (m modelSystem) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m model) updateSystem(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.Type {
 		case tea.KeyEnter:
-			m.content = m.textInput.Value() // TODO : right command ?
-		case tea.KeyCtrlC, tea.KeyEsc:
-			return m, tea.Quit
+			m.system.content = m.system.texting.Value()
+			m.state = CHAT
 		}
 	case error:
 		m.err = msg
 		return m, nil
 	}
-	m.textInput, cmd = m.textInput.Update(msg)
+	m.system.texting, cmd = m.system.texting.Update(msg)
 	return m, cmd
 }
 
-// Model and method for QUESTION
+func initialChat() chatModel {
+	vp := viewport.New(30, 30) // TODO : adapt at size of the terminal
+	vp.SetContent(`Welcome to the chat room! Type a message and press Enter to send.`)
 
-type modelQuestion struct {
-	textInput textinput.Model
-	content   string
-	err       error
-}
+	ta := textarea.New()
+	ta.Placeholder = "Send a message..."
+	ta.Prompt = "┃ "
+	ta.CharLimit = 280
+	ta.FocusedStyle.CursorLine = lipgloss.NewStyle()
+	ta.ShowLineNumbers = false
+	ta.Focus()
+	ta.SetWidth(30)
+	ta.SetHeight(3)
 
-func initialQuestionModel() modelQuestion {
-	ti := textinput.New()
-	ti.Placeholder = "How do we cook meth ?"
-	ti.Focus()
-	ti.CharLimit = 512
-	ti.Width = 100
-	return modelQuestion{
-		textInput: ti,
+	return chatModel{
+		conversation: Conversation{},
+		viewport:     vp,
+		textarea:     ta,
+		messages:     []string{},
 	}
 }
 
-func (m modelQuestion) Init() tea.Cmd {
-	return textinput.Blink
+func (m model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var (
+		tiCmd tea.Cmd
+		vpCmd tea.Cmd
+	)
+
+	m.chat.textarea, tiCmd = m.chat.textarea.Update(msg)
+	m.chat.viewport, vpCmd = m.chat.viewport.Update(msg)
+
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.Type {
+		case tea.KeyCtrlC, tea.KeyEsc:
+			fmt.Println(m.chat.textarea.Value())
+			return m, tea.Quit
+		case tea.KeyEnter:
+			m.chat.messages = append(m.chat.messages, m.senderStyle.Render("You: ")+m.chat.textarea.Value())
+			m.chat.viewport.SetContent(strings.Join(m.chat.messages, "\n"))
+			m.chat.textarea.Reset()
+			m.chat.viewport.GotoBottom()
+		}
+
+	// We handle errors just like any other message
+	case error:
+		m.err = msg
+		return m, nil
+	}
+
+	return m, tea.Batch(tiCmd, vpCmd)
 }
 
-func (m modelQuestion) View() string {
+func (m model) viewChat() string {
 	return fmt.Sprintf(
-		"Enter your question \n\n%s\n\n%s",
-		m.textInput.View(),
-		"(esc to quit)",
-	) + "\n"
-}
-
-func (m modelQuestion) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var cmd tea.Cmd
-
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch msg.Type {
-		case tea.KeyEnter:
-			m.content = m.textInput.Value()
-		case tea.KeyCtrlC, tea.KeyEsc:
-			return m, tea.Quit
-		}
-	case error:
-		m.err = msg
-		return m, nil
-	}
-	m.textInput, cmd = m.textInput.Update(msg)
-	return m, cmd
+		"%s\n\n%s",
+		m.chat.viewport.View(),
+		m.chat.textarea.View(),
+	) + "\n\n"
 }
