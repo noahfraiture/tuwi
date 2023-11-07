@@ -201,7 +201,7 @@ func (selfDB *CouchDB) StoreConversation(conv *Conversation) error {
 	if err != nil {
 		return err
 	}
-	_, err = col.Upsert(conv.ID, conv, nil) // TODO : what about mutation returned value
+	_, err = col.Upsert(conv.ID, conv, nil)
 	conv.HasChange = false
 	return err
 }

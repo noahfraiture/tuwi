@@ -6,6 +6,10 @@ import (
 	"os"
 )
 
+const (
+	MaxTokens = 100
+)
+
 type Key string
 
 var key Key = ""
@@ -71,7 +75,7 @@ func (conv *Conversation) ChatCompletion(question string) (openai.FinishReason, 
 
 	req := openai.ChatCompletionRequest{
 		Model:     conv.Model,
-		MaxTokens: 20, // TODO : edit hyper parameters
+		MaxTokens: MaxTokens,
 		Messages:  append(conv.Messages, newQuestion),
 		Stream:    false,
 	}

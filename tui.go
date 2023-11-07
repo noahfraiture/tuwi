@@ -117,7 +117,7 @@ func initialModel() model {
 		username:         "admin",
 		password:         "admin123",
 		connectionString: "localhost",
-		bucketName:       "test",
+		bucketName:       "conversations",
 		scopeName:        "_default",
 		collectionName:   "_default",
 	}
@@ -401,11 +401,12 @@ func (m model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.chat.viewport.SetContent(strings.Join(m.chat.messages, "\n"))
 			m.chat.textarea.Reset()
 			m.chat.viewport.GotoBottom()
-		case tea.KeyCtrlC:
+		case tea.KeyCtrlS:
 			m.state = SAVE
 			if m.chat.conversation.Name != NEWCONV {
 				m.save.texting.Placeholder = m.chat.conversation.Name
 			}
+			return m, nil
 		}
 	}
 	// TODO : Handle error in type
@@ -449,6 +450,7 @@ func (m model) updateSave(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.Type {
 		case tea.KeyEnter:
 			m.state = CONV
+			// TODO : should retrieve conversations from DB
 			m.save.content = m.save.texting.Value()
 			if m.save.content != "" {
 				m.chat.conversation.Name = m.save.content
@@ -457,8 +459,6 @@ func (m model) updateSave(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if err != nil {
 				m.err = err
 			}
-
-			// TODO : save conversation
 		}
 	case error: // TODO : handle error in others function
 		m.err = msg
