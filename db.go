@@ -236,6 +236,7 @@ func (selfDB *CouchDB) GetDocumentsID() ([]string, error) {
 	return idList, nil
 }
 
+// TODO : Change to query directly everything and not by id
 func (selfDB *CouchDB) GetConversations() ([]Conversation, error) {
 	idList, err := selfDB.GetDocumentsID()
 	if err != nil {

@@ -25,11 +25,6 @@ const (
 	NEWCONV = "newconv"
 )
 
-// TODO : decide if conversation and DB are store here or in the model
-// I prefer to keep the model simple and strict to the display
-// but it generate global variable
-// Also part of the conversation like message must be display
-
 type (
 	tickMsg struct{}
 
@@ -43,6 +38,7 @@ type (
 		save   saveModel
 
 		db          CouchDB
+		renderStyle lipgloss.Style
 		senderStyle lipgloss.Style
 		redStyle    lipgloss.Style
 		greenStyle  lipgloss.Style
@@ -102,7 +98,6 @@ func (i aiVersion) Title() string       { return i.title }
 func (i aiVersion) Description() string { return i.desc }
 func (i aiVersion) FilterValue() string { return i.title }
 
-// Run program
 // TODO : add comments everywhere
 
 func main() {
@@ -131,6 +126,7 @@ func initialModel() model {
 
 		db: db,
 
+		renderStyle: lipgloss.NewStyle().Margin(1, 2),
 		senderStyle: lipgloss.NewStyle().Foreground(lipgloss.Color("5")),
 		redStyle:    lipgloss.NewStyle().Foreground(lipgloss.Color("1")),
 		greenStyle:  lipgloss.NewStyle().Foreground(lipgloss.Color("2")),
@@ -161,8 +157,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		break
 	case tea.WindowSizeMsg:
-		m.windowConv(msg)
-		m.windowAI(msg)
+		// Resizing can't be done in other function or should return a value
+		// since I can't access through a pointer to the list
+		h, v := m.renderStyle.GetFrameSize()
+		m.conv.list.SetSize(msg.Width-h, msg.Height-v)
+		m.ai.list.SetSize(msg.Width-h, msg.Height-v)
 		break
 	}
 
@@ -206,6 +205,7 @@ func (m model) View() string {
 
 // CONVERSATION
 
+// TODO : db weird here. Should maybe load every time the window appear
 func initialConv(db *CouchDB) convModel {
 	conv := convModel{
 		style:  lipgloss.NewStyle().Margin(1, 2),
@@ -232,11 +232,6 @@ func initialConv(db *CouchDB) convModel {
 
 func (m model) viewConv() string {
 	return m.conv.style.Render(m.conv.list.View()) + "\n"
-}
-
-func (m model) windowConv(msg tea.WindowSizeMsg) {
-	h, v := m.conv.style.GetFrameSize()
-	m.conv.list.SetSize(msg.Width-h, msg.Height-v)
 }
 
 func (m model) updateConv(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -289,11 +284,6 @@ func initialAI() aiModel {
 		style:  lipgloss.NewStyle().Margin(1, 2),
 		choice: nil,
 	}
-}
-
-func (m model) windowAI(msg tea.WindowSizeMsg) {
-	h, v := m.ai.style.GetFrameSize()
-	m.ai.list.SetSize(msg.Width-h, msg.Height-v)
 }
 
 func (m model) viewAI() string {
