@@ -117,7 +117,7 @@ func initialModel() model {
 		username:         "admin",
 		password:         "admin123",
 		connectionString: "localhost",
-		bucketName:       "test",
+		bucketName:       "conversations",
 		scopeName:        "_default",
 		collectionName:   "_default",
 	}
@@ -156,6 +156,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyEsc, tea.KeyCtrlC:
 			m.quitting = true
 			return m, tea.Quit
+		case tea.KeyCtrlS:
+			fmt.Println("Saving...")
 		}
 		break
 	case tea.WindowSizeMsg:
@@ -189,15 +191,15 @@ func (m model) View() string {
 	}
 	switch m.state {
 	case CONV:
-		return m.viewConv()
+		return viewList(m.conv.list, m.docStyle)
 	case AI:
-		return m.viewAI()
+		return viewList(m.ai.list, m.docStyle)
 	case SYSTEM:
-		return m.viewSystem()
+		return viewTextInput(m.system.texting)
 	case CHAT:
-		return m.viewChat()
+		return viewChat(m.chat.textarea, m.chat.viewport)
 	case SAVE:
-		return m.viewSave()
+		return viewTextInput(m.save.texting)
 	default:
 		return "State doesn't exist\n"
 	}
@@ -228,8 +230,17 @@ func initialConv(db *CouchDB) convModel {
 	}
 }
 
-func (m model) viewConv() string {
-	return m.docStyle.Render(m.conv.list.View())
+// TODO : should I minimize the number of function or keep a struct with a view per module
+func viewList(list list.Model, style lipgloss.Style) string {
+	return style.Render(list.View())
+}
+
+func viewTextInput(texting textinput.Model) string {
+	return fmt.Sprintf(
+		"Enter system message \n\n%s\n\n%s",
+		texting.View(),
+		"(esc to quit)",
+	) + "\n"
 }
 
 func (m model) updateConv(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -281,10 +292,6 @@ func initialAI() aiModel {
 	}
 }
 
-func (m model) viewAI() string {
-	return m.docStyle.Render(m.ai.list.View())
-}
-
 func (m model) updateAI(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if msg, ok := msg.(tea.KeyMsg); ok && msg.Type == tea.KeyEnter {
 		if i, ok := m.ai.list.SelectedItem().(aiVersion); ok {
@@ -309,14 +316,6 @@ func initialSystem() systemModel {
 		texting: it,
 		content: "",
 	}
-}
-
-func (m model) viewSystem() string {
-	return fmt.Sprintf(
-		"Enter system message \n\n%s\n\n%s",
-		m.system.texting.View(),
-		"(esc to quit)",
-	) + "\n"
 }
 
 func (m model) updateSystem(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -401,11 +400,12 @@ func (m model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.chat.viewport.SetContent(strings.Join(m.chat.messages, "\n"))
 			m.chat.textarea.Reset()
 			m.chat.viewport.GotoBottom()
-		case tea.KeyCtrlC:
+		case tea.KeyCtrlS:
 			m.state = SAVE
 			if m.chat.conversation.Name != NEWCONV {
 				m.save.texting.Placeholder = m.chat.conversation.Name
 			}
+			return m, nil
 		}
 	}
 	// TODO : Handle error in type
@@ -413,11 +413,11 @@ func (m model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(tiCmd, vpCmd)
 }
 
-func (m model) viewChat() string {
+func viewChat(area textarea.Model, port viewport.Model) string {
 	return fmt.Sprintf(
 		"%s\n\n%s",
-		m.chat.viewport.View(),
-		m.chat.textarea.View(),
+		port.View(),
+		area.View(),
 	) + "\n\n"
 }
 
@@ -433,14 +433,6 @@ func initialSave() saveModel {
 	}
 }
 
-func (m model) viewSave() string {
-	return fmt.Sprintf(
-		"Enter system message \n\n%s\n\n%s",
-		m.save.texting.View(),
-		"(esc to quit)",
-	) + "\n"
-}
-
 func (m model) updateSave(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
@@ -449,6 +441,7 @@ func (m model) updateSave(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.Type {
 		case tea.KeyEnter:
 			m.state = CONV
+			// TODO : should retrieve conversations from DB
 			m.save.content = m.save.texting.Value()
 			if m.save.content != "" {
 				m.chat.conversation.Name = m.save.content
@@ -457,8 +450,6 @@ func (m model) updateSave(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if err != nil {
 				m.err = err
 			}
-
-			// TODO : save conversation
 		}
 	case error: // TODO : handle error in others function
 		m.err = msg
