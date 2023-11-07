@@ -43,7 +43,6 @@ type (
 		save   saveModel
 
 		db          CouchDB
-		docStyle    lipgloss.Style
 		senderStyle lipgloss.Style
 		redStyle    lipgloss.Style
 		greenStyle  lipgloss.Style
@@ -55,11 +54,13 @@ type (
 	}
 
 	convModel struct {
+		style  lipgloss.Style
 		list   list.Model
 		choice *Conversation
 	}
 
 	aiModel struct {
+		style  lipgloss.Style
 		list   list.Model
 		choice *aiVersion
 	}
@@ -130,7 +131,6 @@ func initialModel() model {
 
 		db: db,
 
-		docStyle:    lipgloss.NewStyle().Margin(1, 2),
 		senderStyle: lipgloss.NewStyle().Foreground(lipgloss.Color("5")),
 		redStyle:    lipgloss.NewStyle().Foreground(lipgloss.Color("1")),
 		greenStyle:  lipgloss.NewStyle().Foreground(lipgloss.Color("2")),
@@ -161,9 +161,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		break
 	case tea.WindowSizeMsg:
-		h, v := m.docStyle.GetFrameSize()
-		m.conv.list.SetSize(msg.Width-h, msg.Height-v)
-		m.ai.list.SetSize(msg.Width-h, msg.Height-v)
+		m.windowConv(msg)
+		m.windowAI(msg)
 		break
 	}
 
@@ -191,26 +190,29 @@ func (m model) View() string {
 	}
 	switch m.state {
 	case CONV:
-		return viewList(m.conv.list, m.docStyle)
+		return m.viewConv()
 	case AI:
-		return viewList(m.ai.list, m.docStyle)
+		return m.viewAI()
 	case SYSTEM:
-		return viewTextInput(m.system.texting)
+		return m.viewSystem()
 	case CHAT:
-		return viewChat(m.chat.textarea, m.chat.viewport)
+		return m.viewChat()
 	case SAVE:
-		return viewTextInput(m.save.texting)
+		return m.viewSave()
 	default:
 		return "State doesn't exist\n"
 	}
 }
 
+// CONVERSATION
+
 func initialConv(db *CouchDB) convModel {
+	conv := convModel{
+		style:  lipgloss.NewStyle().Margin(1, 2),
+		choice: nil,
+	}
 	if listConv, err := db.GetConversations(); err != nil {
-		return convModel{
-			list:   list.New([]list.Item{}, list.NewDefaultDelegate(), 0, 0),
-			choice: nil,
-		}
+		conv.list = list.New([]list.Item{}, list.NewDefaultDelegate(), 0, 0)
 	} else {
 		listItemConv := make([]list.Item, len(listConv)+1)
 		listItemConv[0] = itemConv(Conversation{
@@ -223,24 +225,18 @@ func initialConv(db *CouchDB) convModel {
 		for i, conv := range listConv {
 			listItemConv[i+1] = itemConv(conv)
 		}
-		return convModel{
-			list:   list.New(listItemConv, list.NewDefaultDelegate(), 0, 0),
-			choice: nil,
-		}
+		conv.list = list.New(listItemConv, list.NewDefaultDelegate(), 0, 0)
 	}
+	return conv
 }
 
-// TODO : should I minimize the number of function or keep a struct with a view per module
-func viewList(list list.Model, style lipgloss.Style) string {
-	return style.Render(list.View())
+func (m model) viewConv() string {
+	return m.conv.style.Render(m.conv.list.View()) + "\n"
 }
 
-func viewTextInput(texting textinput.Model) string {
-	return fmt.Sprintf(
-		"Enter system message \n\n%s\n\n%s",
-		texting.View(),
-		"(esc to quit)",
-	) + "\n"
+func (m model) windowConv(msg tea.WindowSizeMsg) {
+	h, v := m.conv.style.GetFrameSize()
+	m.conv.list.SetSize(msg.Width-h, msg.Height-v)
 }
 
 func (m model) updateConv(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -280,6 +276,8 @@ func (m model) updateConv(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+// AI
+
 func initialAI() aiModel {
 	return aiModel{
 		list: list.New([]list.Item{
@@ -288,8 +286,18 @@ func initialAI() aiModel {
 			aiVersion{title: openai.GPT3Dot5Turbo,
 				desc: "placeholder"},
 		}, list.NewDefaultDelegate(), 0, 0),
+		style:  lipgloss.NewStyle().Margin(1, 2),
 		choice: nil,
 	}
+}
+
+func (m model) windowAI(msg tea.WindowSizeMsg) {
+	h, v := m.ai.style.GetFrameSize()
+	m.ai.list.SetSize(msg.Width-h, msg.Height-v)
+}
+
+func (m model) viewAI() string {
+	return m.ai.style.Render(m.ai.list.View()) + "\n"
 }
 
 func (m model) updateAI(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -306,6 +314,8 @@ func (m model) updateAI(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+// SYSTEM
+
 func initialSystem() systemModel {
 	it := textinput.New()
 	it.Placeholder = "You are a helpful assistant"
@@ -316,6 +326,14 @@ func initialSystem() systemModel {
 		texting: it,
 		content: "",
 	}
+}
+
+func (m model) viewSystem() string {
+	return fmt.Sprintf(
+		"Enter system message \n\n%s\n\n%s",
+		m.system.texting.View(),
+		"(esc to quit)",
+	) + "\n"
 }
 
 func (m model) updateSystem(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -343,6 +361,8 @@ func (m model) updateSystem(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+// CHAT
+
 func initialChat() chatModel {
 	vp := viewport.New(30, 30) // TODO : adapt at size of the terminal
 	vp.SetContent(`Welcome to the chat room! Type a message and press Enter to send.`)
@@ -363,6 +383,14 @@ func initialChat() chatModel {
 		textarea:     ta,
 		messages:     []string{},
 	}
+}
+
+func (m model) viewChat() string {
+	return fmt.Sprintf(
+		"%s\n\n%s",
+		m.chat.viewport.View(),
+		m.chat.textarea.View(),
+	) + "\n\n"
 }
 
 func (m model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -413,13 +441,7 @@ func (m model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(tiCmd, vpCmd)
 }
 
-func viewChat(area textarea.Model, port viewport.Model) string {
-	return fmt.Sprintf(
-		"%s\n\n%s",
-		port.View(),
-		area.View(),
-	) + "\n\n"
-}
+// SAVE
 
 func initialSave() saveModel {
 	it := textinput.New()
@@ -431,6 +453,14 @@ func initialSave() saveModel {
 		texting: it,
 		content: "",
 	}
+}
+
+func (m model) viewSave() string {
+	return fmt.Sprintf(
+		"Enter system message \n\n%s\n\n%s",
+		m.save.texting.View(),
+		"(esc to quit)",
+	) + "\n"
 }
 
 func (m model) updateSave(msg tea.Msg) (tea.Model, tea.Cmd) {
