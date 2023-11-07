@@ -21,6 +21,7 @@ const (
 	CONV    = "conv"
 	SYSTEM  = "system"
 	CHAT    = "chat"
+	SAVE    = "save"
 	NEWCONV = "newconv"
 )
 
@@ -39,6 +40,7 @@ type (
 		ai     aiModel
 		system systemModel
 		chat   chatModel
+		save   saveModel
 
 		db          CouchDB
 		docStyle    lipgloss.Style
@@ -46,6 +48,7 @@ type (
 		redStyle    lipgloss.Style
 		greenStyle  lipgloss.Style
 		yellowStyle lipgloss.Style
+		blueStyle   lipgloss.Style
 		err         error
 		state       string
 		quitting    bool
@@ -73,6 +76,11 @@ type (
 		conversation *Conversation
 	}
 
+	saveModel struct {
+		texting textinput.Model
+		content string
+	}
+
 	aiVersion struct {
 		title, desc string
 	}
@@ -94,6 +102,7 @@ func (i aiVersion) Description() string { return i.desc }
 func (i aiVersion) FilterValue() string { return i.title }
 
 // Run program
+// TODO : add comments everywhere
 
 func main() {
 	p := tea.NewProgram(initialModel())
@@ -117,6 +126,7 @@ func initialModel() model {
 		ai:     initialAI(),
 		system: initialSystem(),
 		chat:   initialChat(),
+		save:   initialSave(),
 
 		db: db,
 
@@ -125,6 +135,7 @@ func initialModel() model {
 		redStyle:    lipgloss.NewStyle().Foreground(lipgloss.Color("1")),
 		greenStyle:  lipgloss.NewStyle().Foreground(lipgloss.Color("2")),
 		yellowStyle: lipgloss.NewStyle().Foreground(lipgloss.Color("3")),
+		blueStyle:   lipgloss.NewStyle().Foreground(lipgloss.Color("4")), // TODO : is it blue ?
 		state:       CONV,
 		quitting:    false,
 	}
@@ -137,8 +148,6 @@ func (m model) Init() tea.Cmd {
 	})
 }
 
-// Update TODO : it seems that display two list one after the other doesn't work
-// ai -> conv or conv -> ai is same shit
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
@@ -165,6 +174,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateSystem(msg)
 	case CHAT:
 		return m.updateChat(msg)
+	case SAVE:
+		return m.updateSave(msg)
 	default:
 		m.err = errors.New("State doesn't exist\n")
 		println(m.err)
@@ -185,6 +196,8 @@ func (m model) View() string {
 		return m.viewSystem()
 	case CHAT:
 		return m.viewChat()
+	case SAVE:
+		return m.viewSave()
 	default:
 		return "State doesn't exist\n"
 	}
@@ -197,9 +210,16 @@ func initialConv(db *CouchDB) convModel {
 			choice: nil,
 		}
 	} else {
-		listItemConv := make([]list.Item, len(listConv))
+		listItemConv := make([]list.Item, len(listConv)+1)
+		listItemConv[0] = itemConv(Conversation{
+			ID:        NEWCONV,
+			Model:     "",
+			Name:      "New conversation",
+			Messages:  nil,
+			HasChange: false,
+		})
 		for i, conv := range listConv {
-			listItemConv[i] = itemConv(conv)
+			listItemConv[i+1] = itemConv(conv)
 		}
 		return convModel{
 			list:   list.New(listItemConv, list.NewDefaultDelegate(), 0, 0),
@@ -213,27 +233,33 @@ func (m model) viewConv() string {
 }
 
 func (m model) updateConv(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// If the user choose the NEWCONV conversation, we create a new one
+	// Else we replace the existing one by the chosen one and go directly to the chat
 
 	if msg, ok := msg.(tea.KeyMsg); ok {
 		switch msg.Type {
 		case tea.KeyEnter:
 			if i, ok := m.conv.list.SelectedItem().(itemConv); ok {
-				m.state = AI
+				if i.ID == NEWCONV {
+					m.state = AI
+					randomBytes := make([]rune, 8)
+					var letterRunes = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
+					for i := range randomBytes {
+						randomBytes[i] = letterRunes[rand.Intn(len(letterRunes))]
+					}
+					m.chat.conversation = &Conversation{
+						ID:        string(randomBytes),
+						Model:     "",
+						Name:      "",
+						Messages:  nil,
+						HasChange: false,
+					}
+					// TODO choice : if we go back here, will it reset the conversation ? If yes it must be here
+				} else {
+					m.state = CHAT
+					m.chat.conversation = (*Conversation)(&i)
+				}
 				m.conv.choice = (*Conversation)(&i) // TODO : does the conversation loose data ?
-			}
-		case tea.KeyBackspace:
-			randomBytes := make([]rune, 8)
-			var letterRunes = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
-			for i := range randomBytes {
-				randomBytes[i] = letterRunes[rand.Intn(len(letterRunes))]
-			}
-			m.state = AI
-			m.chat.conversation = &Conversation{
-				ID:        string(randomBytes),
-				Model:     "",
-				Name:      "",
-				Messages:  nil,
-				HasChange: false,
 			}
 		}
 	}
@@ -310,7 +336,7 @@ func (m model) updateSystem(msg tea.Msg) (tea.Model, tea.Cmd) {
 				Content: m.system.content,
 			})
 		}
-	case error:
+	case error: // TODO : handle error in others function
 		m.err = msg
 		return m, nil
 	}
@@ -352,9 +378,6 @@ func (m model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.Type {
-		case tea.KeyCtrlC, tea.KeyEsc:
-			fmt.Println(m.chat.textarea.Value())
-			return m, tea.Quit
 		case tea.KeyEnter:
 			m.chat.messages = append(m.chat.messages, m.senderStyle.Render("You: ")+m.chat.textarea.Value())
 
@@ -363,25 +386,29 @@ func (m model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.err = err
 				return m, nil
 			}
+			var style lipgloss.Style
 			switch finishReason {
 			case openai.FinishReasonStop:
-				m.chat.messages = append(m.chat.messages, m.greenStyle.Render("Bot : ")+m.chat.conversation.Messages[len(m.chat.conversation.Messages)-1].Content)
+				style = m.greenStyle
 			case openai.FinishReasonLength:
-				m.chat.messages = append(m.chat.messages, m.yellowStyle.Render("Bot : ")+m.chat.conversation.Messages[len(m.chat.conversation.Messages)-1].Content)
+				style = m.yellowStyle
 			case openai.FinishReasonContentFilter:
-				m.chat.messages = append(m.chat.messages, m.redStyle.Render("Bot : ")+m.chat.conversation.Messages[len(m.chat.conversation.Messages)-1].Content)
-
+				style = m.redStyle
+			default:
+				style = m.blueStyle
 			}
+			m.chat.messages = append(m.chat.messages, style.Render("Bot : ")+m.chat.conversation.Messages[len(m.chat.conversation.Messages)-1].Content)
 			m.chat.viewport.SetContent(strings.Join(m.chat.messages, "\n"))
 			m.chat.textarea.Reset()
 			m.chat.viewport.GotoBottom()
+		case tea.KeyCtrlC:
+			m.state = SAVE
+			if m.chat.conversation.Name != NEWCONV {
+				m.save.texting.Placeholder = m.chat.conversation.Name
+			}
 		}
-
-	// We handle errors just like any other message
-	case error:
-		m.err = msg
-		return m, nil
 	}
+	// TODO : Handle error in type
 
 	return m, tea.Batch(tiCmd, vpCmd)
 }
@@ -392,4 +419,51 @@ func (m model) viewChat() string {
 		m.chat.viewport.View(),
 		m.chat.textarea.View(),
 	) + "\n\n"
+}
+
+func initialSave() saveModel {
+	it := textinput.New()
+	it.Placeholder = "Name of the conversation..."
+	it.CharLimit = 32
+	it.Width = 20
+	it.Focus()
+	return saveModel{
+		texting: it,
+		content: "",
+	}
+}
+
+func (m model) viewSave() string {
+	return fmt.Sprintf(
+		"Enter system message \n\n%s\n\n%s",
+		m.save.texting.View(),
+		"(esc to quit)",
+	) + "\n"
+}
+
+func (m model) updateSave(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.Type {
+		case tea.KeyEnter:
+			m.state = CONV
+			m.save.content = m.save.texting.Value()
+			if m.save.content != "" {
+				m.chat.conversation.Name = m.save.content
+			}
+			err := m.db.StoreConversation(m.chat.conversation)
+			if err != nil {
+				m.err = err
+			}
+
+			// TODO : save conversation
+		}
+	case error: // TODO : handle error in others function
+		m.err = msg
+		return m, nil
+	}
+	m.save.texting, cmd = m.save.texting.Update(msg)
+	return m, cmd
 }
