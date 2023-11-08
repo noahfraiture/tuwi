@@ -10,7 +10,18 @@ const (
 	MaxTokens = 100
 )
 
-type Key string
+type (
+	// Conversation TODO : Where should I put this shit ?
+	Conversation struct {
+		ID        string                         `json:"id"`
+		Model     string                         `json:"model"`
+		Name      string                         `json:"name"`
+		Messages  []openai.ChatCompletionMessage `json:"messages"` // TODO : are these message able to be json ?
+		HasChange bool                           `json:"has_change"`
+	}
+
+	Key string
+)
 
 var key Key = ""
 

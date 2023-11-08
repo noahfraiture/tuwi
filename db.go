@@ -4,20 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"github.com/couchbase/gocb/v2"
-	"github.com/sashabaranov/go-openai"
 	"time"
 )
 
 type (
-	// Conversation TODO : Where should I put this shit ?
-	Conversation struct {
-		ID        string                         `json:"id"`
-		Model     string                         `json:"model"`
-		Name      string                         `json:"name"`
-		Messages  []openai.ChatCompletionMessage `json:"messages"` // TODO : are these message able to be json ?
-		HasChange bool                           `json:"has_change"`
-	}
-
 	// CouchDB TODO : if I want to divide my db in multiple scope, I can divide this structure in multiple struct
 	CouchDB struct {
 		username         string
@@ -32,6 +22,8 @@ type (
 		collection       *gocb.Collection
 	}
 )
+
+var conversations []Conversation
 
 func (selfDB *CouchDB) getCluster() (*gocb.Cluster, error) {
 	if selfDB.cluster == nil {
@@ -238,6 +230,9 @@ func (selfDB *CouchDB) GetDocumentsID() ([]string, error) {
 
 // TODO : Change to query directly everything and not by id
 func (selfDB *CouchDB) GetConversations() ([]Conversation, error) {
+	if conversations != nil {
+		return conversations, nil
+	}
 	idList, err := selfDB.GetDocumentsID()
 	if err != nil {
 		return nil, err
@@ -249,5 +244,6 @@ func (selfDB *CouchDB) GetConversations() ([]Conversation, error) {
 			return nil, err
 		}
 	}
+	conversations = convList
 	return convList, nil
 }
