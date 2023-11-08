@@ -17,12 +17,14 @@ import (
 )
 
 const (
-	AI      = "ai"
-	CONV    = "conv"
-	SYSTEM  = "system"
-	CHAT    = "chat"
-	SAVE    = "save"
-	NEWCONV = "newconv"
+	AI        = "ai"
+	CONV      = "conv"
+	SYSTEM    = "system"
+	CHAT      = "chat"
+	SAVE      = "save"
+	START     = "start"
+	NEWCONV   = "new-conv"
+	BASEMODEL = openai.GPT3Dot5Turbo
 )
 
 type (
@@ -37,7 +39,8 @@ type (
 		chat   chatModel
 		save   saveModel
 
-		db          CouchDB
+		conversations Conversations
+
 		renderStyle lipgloss.Style
 		senderStyle lipgloss.Style
 		redStyle    lipgloss.Style
@@ -109,22 +112,14 @@ func main() {
 }
 
 func initialModel() model {
-	db := CouchDB{
-		username:         "admin",
-		password:         "admin123",
-		connectionString: "localhost",
-		bucketName:       "conversations",
-		scopeName:        "_default",
-		collectionName:   "_default",
-	}
 	return model{
-		conv:   initialConv(&db),
+		conv:   initialConv(),
 		ai:     initialAI(),
 		system: initialSystem(),
 		chat:   initialChat(),
 		save:   initialSave(),
 
-		db: db,
+		conversations: Conversations{},
 
 		renderStyle: lipgloss.NewStyle().Margin(1, 2),
 		senderStyle: lipgloss.NewStyle().Foreground(lipgloss.Color("5")),
@@ -132,7 +127,7 @@ func initialModel() model {
 		greenStyle:  lipgloss.NewStyle().Foreground(lipgloss.Color("2")),
 		yellowStyle: lipgloss.NewStyle().Foreground(lipgloss.Color("3")),
 		blueStyle:   lipgloss.NewStyle().Foreground(lipgloss.Color("4")), // TODO : is it blue ?
-		state:       CONV,
+		state:       START,
 		quitting:    false,
 	}
 
@@ -145,6 +140,10 @@ func (m model) Init() tea.Cmd {
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+
+	if m.state == START {
+		m.switchToConv()
+	}
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -206,26 +205,11 @@ func (m model) View() string {
 // CONVERSATION
 
 // TODO : remove db and use switchToConv
-func initialConv(db *CouchDB) convModel {
+func initialConv() convModel {
 	conv := convModel{
 		style:  lipgloss.NewStyle().Margin(1, 2),
+		list:   list.New([]list.Item{}, list.NewDefaultDelegate(), 0, 0),
 		choice: nil,
-	}
-	if listConv, err := db.GetConversations(); err != nil {
-		conv.list = list.New([]list.Item{}, list.NewDefaultDelegate(), 0, 0)
-	} else {
-		listItemConv := make([]list.Item, len(listConv)+1)
-		listItemConv[0] = itemConv(Conversation{
-			ID:        NEWCONV,
-			Model:     "",
-			Name:      "New conversation",
-			Messages:  nil,
-			HasChange: false,
-		})
-		for i, conv := range listConv {
-			listItemConv[i+1] = itemConv(conv)
-		}
-		conv.list = list.New(listItemConv, list.NewDefaultDelegate(), 0, 0)
 	}
 	return conv
 }
@@ -243,7 +227,6 @@ func (m model) updateConv(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyEnter:
 			if i, ok := m.conv.list.SelectedItem().(itemConv); ok {
 				if i.ID == NEWCONV {
-					m.state = AI
 					randomBytes := make([]rune, 8)
 					var letterRunes = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
 					for i := range randomBytes {
@@ -257,9 +240,10 @@ func (m model) updateConv(msg tea.Msg) (tea.Model, tea.Cmd) {
 						HasChange: false,
 					}
 					// TODO choice : if we go back here, will it reset the conversation ? If yes it must be here
+					m.switchToAI()
 				} else {
-					m.state = CHAT
 					m.chat.conversation = (*Conversation)(&i)
+					m.switchToChat()
 				}
 				m.conv.choice = (*Conversation)(&i) // TODO : does the conversation loose data ?
 			}
@@ -271,26 +255,30 @@ func (m model) updateConv(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m model) switchToConv() {
+func (m *model) switchToConv() error {
 	m.state = CONV
 	m.conv.choice = nil
 
-	if listConv, err := m.db.GetConversations(); err != nil {
-		m.conv.list = list.New([]list.Item{}, list.NewDefaultDelegate(), 0, 0)
-	} else {
-		listItemConv := make([]list.Item, len(listConv)+1)
-		listItemConv[0] = itemConv(Conversation{
-			ID:        NEWCONV,
-			Model:     "",
-			Name:      "New conversation",
-			Messages:  nil,
-			HasChange: false,
-		})
-		for i, conv := range listConv {
-			listItemConv[i+1] = itemConv(conv)
-		}
-		m.conv.list = list.New(listItemConv, list.NewDefaultDelegate(), 0, 0)
+	// TODO : handle this error somewhere else to throw away the return values
+	err := m.conversations.UpdateConversations()
+	if err != nil {
+		return err
 	}
+	listItemConv := make([]list.Item, len(m.conversations)+1)
+	listItemConv[0] = itemConv(Conversation{
+		ID:        NEWCONV,
+		Model:     BASEMODEL,
+		Name:      "New conversation",
+		Messages:  nil,
+		HasChange: false,
+	})
+	var i = 1
+	for _, conv := range m.conversations {
+		listItemConv[i] = itemConv(conv)
+		i++
+	}
+	m.conv.list = list.New(listItemConv, list.NewDefaultDelegate(), 0, 0)
+	return err
 }
 
 // AI
@@ -315,9 +303,9 @@ func (m model) viewAI() string {
 func (m model) updateAI(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if msg, ok := msg.(tea.KeyMsg); ok && msg.Type == tea.KeyEnter {
 		if i, ok := m.ai.list.SelectedItem().(aiVersion); ok {
-			m.state = SYSTEM
 			m.ai.choice = &i
 			m.chat.conversation.Model = i.title
+			m.switchToSystem()
 		}
 	}
 
@@ -326,7 +314,7 @@ func (m model) updateAI(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m model) switchToAI() {
+func (m *model) switchToAI() {
 	m.state = AI
 	m.ai.choice = nil
 }
@@ -360,7 +348,6 @@ func (m model) updateSystem(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.Type {
 		case tea.KeyEnter:
-			m.state = CHAT
 			m.system.content = m.system.texting.Value()
 			if m.system.content == "" {
 				m.system.content = "You are a helpful assistant"
@@ -369,6 +356,7 @@ func (m model) updateSystem(msg tea.Msg) (tea.Model, tea.Cmd) {
 				Role:    openai.ChatMessageRoleSystem,
 				Content: m.system.content,
 			})
+			m.switchToChat()
 		}
 	case error: // TODO : handle error in others function
 		m.err = msg
@@ -378,7 +366,7 @@ func (m model) updateSystem(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m model) switchToSystem() {
+func (m *model) switchToSystem() {
 	m.state = SYSTEM
 	m.system.content = ""
 	m.system.texting.Reset() // TODO : is it necessary ?
@@ -387,7 +375,7 @@ func (m model) switchToSystem() {
 // CHAT
 
 func initialChat() chatModel {
-	vp := viewport.New(30, 30) // TODO : adapt at size of the terminal
+	vp := viewport.New(100, 30) // TODO : adapt at size of the terminal
 	vp.SetContent(`Welcome to the chat room! Type a message and press Enter to send.`)
 
 	ta := textarea.New()
@@ -410,10 +398,10 @@ func initialChat() chatModel {
 
 func (m model) viewChat() string {
 	return fmt.Sprintf(
-		"%s\n\n%s",
+		"%s\n\n%s\n\n",
 		m.chat.viewport.View(),
 		m.chat.textarea.View(),
-	) + "\n\n"
+	)
 }
 
 func (m model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -437,6 +425,7 @@ func (m model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			var style lipgloss.Style
+			// TODO : color does not work, lipgloss ?
 			switch finishReason {
 			case openai.FinishReasonStop:
 				style = m.greenStyle
@@ -452,10 +441,10 @@ func (m model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.chat.textarea.Reset()
 			m.chat.viewport.GotoBottom()
 		case tea.KeyCtrlS:
-			m.state = SAVE
 			if m.chat.conversation.Name != NEWCONV {
 				m.save.texting.Placeholder = m.chat.conversation.Name
 			}
+			m.switchToSave()
 			return m, nil
 		}
 	}
@@ -464,19 +453,29 @@ func (m model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(tiCmd, vpCmd)
 }
 
-func (m model) switchToChat() {
+func (m *model) switchToChat() {
+	// TODO : only display after first message
 	m.state = CHAT
 	m.chat.messages = []string{}
 	for _, msg := range m.chat.conversation.Messages {
+		var style lipgloss.Style
+		var user string
 		switch msg.Role {
 		// TODO : finishReason is missing from the struct, so the color is not right
 		case openai.ChatMessageRoleSystem:
-			m.chat.messages = append(m.chat.messages, m.greenStyle.Render("Bot : ")+msg.Content)
+			style = m.greenStyle
+			user = "System: "
 		case openai.ChatMessageRoleUser:
-			m.chat.messages = append(m.chat.messages, m.senderStyle.Render("You: ")+msg.Content)
-		}
-	}
+			style = m.senderStyle
+			user = "You: "
+		case openai.ChatMessageRoleAssistant:
+			style = m.blueStyle
+			user = "Bot: "
 
+		}
+		m.chat.messages = append(m.chat.messages, style.Render(user)+msg.Content)
+	}
+	m.chat.viewport.SetContent(strings.Join(m.chat.messages, "\n"))
 }
 
 // SAVE
@@ -508,26 +507,24 @@ func (m model) updateSave(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.Type {
 		case tea.KeyEnter:
-			m.state = CONV
 			// TODO : should retrieve conversations from DB
 			m.save.content = m.save.texting.Value()
 			if m.save.content != "" {
 				m.chat.conversation.Name = m.save.content
 			}
-			err := m.db.StoreConversation(m.chat.conversation)
+			err := m.chat.conversation.SaveConversation()
 			if err != nil {
 				m.err = err
 			}
+			// TODO : handle this particular switch which is annoying
+			m.switchToConv()
 		}
-	case error: // TODO : handle error in others function
-		m.err = msg
-		return m, nil
 	}
 	m.save.texting, cmd = m.save.texting.Update(msg)
 	return m, cmd
 }
 
-func (m model) switchToSave() {
+func (m *model) switchToSave() {
 	m.state = SAVE
 	m.save.content = ""
 	m.save.texting.Reset() // TODO : is it necessary ?

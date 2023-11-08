@@ -11,13 +11,12 @@ const (
 )
 
 type (
-	// Conversation TODO : Where should I put this shit ?
 	Conversation struct {
 		ID        string                         `json:"id"`
 		Model     string                         `json:"model"`
 		Name      string                         `json:"name"`
-		Messages  []openai.ChatCompletionMessage `json:"messages"` // TODO : are these message able to be json ?
 		HasChange bool                           `json:"has_change"`
+		Messages  []openai.ChatCompletionMessage `json:"messages"`
 	}
 
 	Key string
@@ -72,7 +71,7 @@ func (openClient *OpenClient) Invalid() bool {
 	return ok
 }
 
-func (conv *Conversation) ChatCompletion(question string) (openai.FinishReason, error) {
+func (conv *Conversation) ChatCompletionSize(question string, maxTokens int) (openai.FinishReason, error) {
 	client, err := GetClient()
 	if err != nil {
 		return "", err
@@ -86,7 +85,7 @@ func (conv *Conversation) ChatCompletion(question string) (openai.FinishReason, 
 
 	req := openai.ChatCompletionRequest{
 		Model:     conv.Model,
-		MaxTokens: MaxTokens,
+		MaxTokens: maxTokens,
 		Messages:  append(conv.Messages, newQuestion),
 		Stream:    false,
 	}
@@ -104,4 +103,8 @@ func (conv *Conversation) ChatCompletion(question string) (openai.FinishReason, 
 	// Todo : is there a choices 0 in case of err ?
 	// TODO : we add the messages to the struct but don't return it
 	return resp.Choices[0].FinishReason, err
+}
+
+func (conv *Conversation) ChatCompletion(question string) (openai.FinishReason, error) {
+	return conv.ChatCompletionSize(question, MaxTokens)
 }

@@ -145,9 +145,9 @@ func TestConversation_ChatCompletion_TooLong(t *testing.T) {
 		},
 		HasChange: false,
 	}
-	finishReason, err := conversation.ChatCompletion("how do you do ? I do fine for my self, " +
-		"I think the most important thing here is that you feel good too. " +
-		"I would like you to explain to me in a few page how you feel")
+	finishReason, err := conversation.ChatCompletionSize("how do you do ? I do fine for my self, "+
+		"I think the most important thing here is that you feel good too. "+
+		"I would like you to explain to me in a few page how you feel", 10)
 	if err != nil {
 		t.Error(err)
 	}
