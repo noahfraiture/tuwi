@@ -72,6 +72,7 @@ func TestOpenClient_Invalid(t *testing.T) {
 }
 
 func TestConversation_ChatCompletion_Empty(t *testing.T) {
+	// TODO API HAS CHANGE, ERROR
 	conversation := Conversation{
 		ID:    "conv1",
 		Model: openai.GPT3Dot5Turbo,

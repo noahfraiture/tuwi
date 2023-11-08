@@ -88,7 +88,7 @@ func (conv itemConv) Title() string {
 	return conv.Name
 }
 func (conv itemConv) Description() string {
-	return conv.ID
+	return conv.Model
 }
 func (conv itemConv) FilterValue() string {
 	return conv.Name
@@ -205,7 +205,7 @@ func (m model) View() string {
 
 // CONVERSATION
 
-// TODO : db weird here. Should maybe load every time the window appear
+// TODO : remove db and use switchToConv
 func initialConv(db *CouchDB) convModel {
 	conv := convModel{
 		style:  lipgloss.NewStyle().Margin(1, 2),
@@ -271,6 +271,28 @@ func (m model) updateConv(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m model) switchToConv() {
+	m.state = CONV
+	m.conv.choice = nil
+
+	if listConv, err := m.db.GetConversations(); err != nil {
+		m.conv.list = list.New([]list.Item{}, list.NewDefaultDelegate(), 0, 0)
+	} else {
+		listItemConv := make([]list.Item, len(listConv)+1)
+		listItemConv[0] = itemConv(Conversation{
+			ID:        NEWCONV,
+			Model:     "",
+			Name:      "New conversation",
+			Messages:  nil,
+			HasChange: false,
+		})
+		for i, conv := range listConv {
+			listItemConv[i+1] = itemConv(conv)
+		}
+		m.conv.list = list.New(listItemConv, list.NewDefaultDelegate(), 0, 0)
+	}
+}
+
 // AI
 
 func initialAI() aiModel {
@@ -302,6 +324,11 @@ func (m model) updateAI(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.ai.list, cmd = m.ai.list.Update(msg)
 	return m, cmd
+}
+
+func (m model) switchToAI() {
+	m.state = AI
+	m.ai.choice = nil
 }
 
 // SYSTEM
@@ -349,6 +376,12 @@ func (m model) updateSystem(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	m.system.texting, cmd = m.system.texting.Update(msg)
 	return m, cmd
+}
+
+func (m model) switchToSystem() {
+	m.state = SYSTEM
+	m.system.content = ""
+	m.system.texting.Reset() // TODO : is it necessary ?
 }
 
 // CHAT
@@ -431,6 +464,21 @@ func (m model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(tiCmd, vpCmd)
 }
 
+func (m model) switchToChat() {
+	m.state = CHAT
+	m.chat.messages = []string{}
+	for _, msg := range m.chat.conversation.Messages {
+		switch msg.Role {
+		// TODO : finishReason is missing from the struct, so the color is not right
+		case openai.ChatMessageRoleSystem:
+			m.chat.messages = append(m.chat.messages, m.greenStyle.Render("Bot : ")+msg.Content)
+		case openai.ChatMessageRoleUser:
+			m.chat.messages = append(m.chat.messages, m.senderStyle.Render("You: ")+msg.Content)
+		}
+	}
+
+}
+
 // SAVE
 
 func initialSave() saveModel {
@@ -477,4 +525,10 @@ func (m model) updateSave(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	m.save.texting, cmd = m.save.texting.Update(msg)
 	return m, cmd
+}
+
+func (m model) switchToSave() {
+	m.state = SAVE
+	m.save.content = ""
+	m.save.texting.Reset() // TODO : is it necessary ?
 }
