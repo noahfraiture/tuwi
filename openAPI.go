@@ -26,11 +26,11 @@ var key Key = ""
 
 func GetKey() (Key, error) {
 	if key == "" {
-		dat, err := os.ReadFile("key")
+		data, err := os.ReadFile("key")
 		if err != nil {
 			return "", err
 		}
-		key = Key(dat)
+		key = Key(data)
 	}
 	return key, nil
 }

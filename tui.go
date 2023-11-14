@@ -101,9 +101,6 @@ func (i aiVersion) Title() string       { return i.title }
 func (i aiVersion) Description() string { return i.desc }
 func (i aiVersion) FilterValue() string { return i.title }
 
-// TODO : add comments everywhere
-// Try use model pointer everywhere and create copy when necessary
-
 func main() {
 	p := tea.NewProgram(initialModel())
 	if _, err := p.Run(); err != nil {
@@ -127,7 +124,7 @@ func initialModel() model {
 		redStyle:    lipgloss.NewStyle().Foreground(lipgloss.Color("1")),
 		greenStyle:  lipgloss.NewStyle().Foreground(lipgloss.Color("2")),
 		yellowStyle: lipgloss.NewStyle().Foreground(lipgloss.Color("3")),
-		blueStyle:   lipgloss.NewStyle().Foreground(lipgloss.Color("4")), // TODO : is it blue ?
+		blueStyle:   lipgloss.NewStyle().Foreground(lipgloss.Color("4")),
 		state:       START,
 		quitting:    false,
 	}
@@ -144,6 +141,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	if m.state == START {
 		m = m.switchToConv()
+	}
+
+	if m.err != nil {
+		for _, err := range m.err {
+			fmt.Println(err)
+		}
+		m.err = nil
 	}
 
 	switch msg := msg.(type) {
@@ -247,7 +251,7 @@ func (m model) updateConv(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.chat.conversation = (*Conversation)(&i)
 					m = m.switchToChat()
 				}
-				m.conv.choice = (*Conversation)(&i) // TODO : does the conversation loose data ?
+				m.conv.choice = (*Conversation)(&i)
 			}
 		}
 	}
@@ -330,7 +334,7 @@ func (m model) switchToAI() model {
 
 func initialSystem() systemModel {
 	it := textinput.New()
-	it.Placeholder = "You are a helpful assistant"
+	it.Placeholder = "You are a helpful assistant\n"
 	it.CharLimit = 156
 	it.Width = 20
 	it.Focus() // TODO : has the order any importance ?
@@ -424,7 +428,8 @@ func (m model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.Type {
 		case tea.KeyEnter:
-			m.chat.messages = append(m.chat.messages, m.senderStyle.Render("You: ")+m.chat.textarea.Value())
+			currentMessage := m.chat.textarea.Value()
+			m.chat.messages = append(m.chat.messages, m.senderStyle.Render("You: ")+currentMessage)
 
 			finishReason, err := m.chat.conversation.ChatCompletion(m.chat.textarea.Value())
 			if err != nil {
@@ -432,7 +437,6 @@ func (m model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			var style lipgloss.Style
-			// TODO : color does not work, lipgloss ?
 			switch finishReason {
 			case openai.FinishReasonStop:
 				style = m.greenStyle
@@ -462,7 +466,6 @@ func (m model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) switchToChat() model {
-	// TODO : only display after first message
 	m.state = CHAT
 	m.chat.messages = []string{}
 	for _, msg := range m.chat.conversation.Messages {
