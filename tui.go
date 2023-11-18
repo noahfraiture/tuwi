@@ -17,14 +17,14 @@ import (
 )
 
 const (
-	AI        = "ai"
-	CONV      = "conv"
-	SYSTEM    = "system"
-	CHAT      = "chat"
-	SAVE      = "save"
-	START     = "start"
-	NEWCONV   = "new-conv"
-	BASEMODEL = openai.GPT3Dot5Turbo
+	KEY     = "key"
+	AI      = "ai"
+	CONV    = "conv"
+	SYSTEM  = "system"
+	CHAT    = "chat"
+	SAVE    = "save"
+	START   = "start"
+	NEWCONV = "new-conv"
 )
 
 type (
@@ -33,6 +33,7 @@ type (
 	// MAIN MODEL
 	// TODO : could use factory to remove duplicate code ?
 	model struct {
+		key    keyModel
 		conv   convModel
 		ai     aiModel
 		system systemModel
@@ -50,6 +51,11 @@ type (
 		err         []error
 		state       string
 		quitting    bool
+	}
+
+	keyModel struct {
+		texting textinput.Model
+		content string
 	}
 
 	convModel struct {
@@ -85,6 +91,10 @@ type (
 		title, desc string
 	}
 	itemConv Conversation
+
+	// TODO : factory for initial model and interface for subModel
+	// the problem is that methods like updateConv() have effect on other fields than conv, like chat
+	// Thus I can not properly use interface and methods for convModel
 )
 
 func (conv itemConv) Title() string {
@@ -111,6 +121,7 @@ func main() {
 
 func initialModel() model {
 	return model{
+		key:    initialKey(),
 		conv:   initialConv(),
 		ai:     initialAI(),
 		system: initialSystem(),
@@ -138,7 +149,7 @@ func (m model) Init() tea.Cmd {
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-
+	// TODO : if user has no key, start as key
 	if m.state == START {
 		m = m.switchToConv()
 	}
@@ -156,8 +167,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyEsc, tea.KeyCtrlC:
 			m.quitting = true
 			return m, tea.Quit
-		case tea.KeyCtrlS:
-			fmt.Println("Saving...")
 		}
 		break
 	case tea.WindowSizeMsg:
@@ -172,6 +181,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	switch m.state {
+	case KEY:
+		return m.updateKey(msg)
 	case CONV:
 		return m.updateConv(msg)
 	case AI:
@@ -208,9 +219,56 @@ func (m model) View() string {
 	}
 }
 
-// CONVERSATION
+// KEY - View to ask the key to the user if he never entered one
 
-// TODO : remove db and use switchToConv
+func initialKey() keyModel {
+	it := textinput.New()
+	it.Placeholder = "sk-xxxxxxxx\n"
+	it.CharLimit = 156
+	it.Width = 20
+	it.Focus() // TODO : has the order any importance ?
+	return keyModel{
+		texting: it,
+		content: "",
+	}
+}
+
+func (m model) viewKey() string {
+	return fmt.Sprintf(
+		"Enter your key \n\n%s\n\n%s",
+		m.key.texting.View(),
+		"(esc to quit)",
+	) + "\n"
+}
+
+func (m model) updateKey(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.Type {
+		case tea.KeyEnter:
+			m.key.content = m.key.texting.Value()
+			if m.key.content == "" {
+				// TODO : warning the user has no input. I could parse the input and display a cross icon until it's valid
+			}
+			// TODO : store key
+			m = m.switchToConv()
+		}
+	}
+	m.key.texting, cmd = m.key.texting.Update(msg)
+	return m, cmd
+}
+
+func (m model) switchToKey() model {
+	m.state = KEY
+	m.key.content = ""
+	m.key.texting.Reset() // TODO : is it necessary ?
+	return m
+}
+
+// CONVERSATION - View to choose the conversation. List conversations from db (-> CHAT) + "New conversation" (-> AI)
+
 func initialConv() convModel {
 	conv := convModel{
 		style:  lipgloss.NewStyle().Margin(1, 2),
@@ -286,15 +344,15 @@ func (m model) switchToConv() model {
 	return m
 }
 
-// AI
+// AI - View to choose the AI. List AI from openAI. -> System. CTRL+Z -> Conversation
 
 func initialAI() aiModel {
 	return aiModel{
 		list: list.New([]list.Item{
-			aiVersion{title: openai.GPT4,
-				desc: "placeholder"},
+			aiVersion{title: openai.GPT4, // TODO reformat this like said in jimmy's message
+				desc: "PRICE"}, // TODO PRICE
 			aiVersion{title: openai.GPT3Dot5Turbo,
-				desc: "placeholder"},
+				desc: "PRICE"},
 		}, list.NewDefaultDelegate(), 0, 0),
 		style:  lipgloss.NewStyle().Margin(1, 2),
 		choice: nil,
@@ -330,7 +388,7 @@ func (m model) switchToAI() model {
 	return m
 }
 
-// SYSTEM
+// SYSTEM - View to choose the system message. -> Chat. CTRL+Z -> AI
 
 func initialSystem() systemModel {
 	it := textinput.New()
@@ -361,7 +419,7 @@ func (m model) updateSystem(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyEnter:
 			m.system.content = m.system.texting.Value()
 			if m.system.content == "" {
-				m.system.content = "You are a helpful assistant"
+				m.system.content = "You are a helpful assistant\n"
 			}
 			m.chat.conversation.Messages = append(m.chat.conversation.Messages, openai.ChatCompletionMessage{
 				Role:    openai.ChatMessageRoleSystem,
@@ -383,7 +441,7 @@ func (m model) switchToSystem() model {
 	return m
 }
 
-// CHAT
+// CHAT - View to chat with the AI. CTRL+S -> Save. CTRL+Z -> System
 
 func initialChat() chatModel {
 	vp := viewport.New(100, 30) // TODO : adapt at size of the terminal
@@ -428,6 +486,8 @@ func (m model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.Type {
 		case tea.KeyEnter:
+
+			// NOTE : We don't have to add a newline since it's already done by the textarea
 			currentMessage := m.chat.textarea.Value()
 			m.chat.messages = append(m.chat.messages, m.senderStyle.Render("You: ")+currentMessage)
 
@@ -447,7 +507,12 @@ func (m model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			default:
 				style = m.blueStyle
 			}
-			m.chat.messages = append(m.chat.messages, style.Render("Bot : ")+m.chat.conversation.Messages[len(m.chat.conversation.Messages)-1].Content)
+
+			// NOTE : Here we do have to add the newline since the response of openAI have no newline
+			botMessage := m.chat.conversation.Messages[len(m.chat.conversation.Messages)-1].Content + "\n"
+			m.chat.messages = append(m.chat.messages, style.Render("Bot : ")+botMessage)
+
+			// TODO :  We reload the entiere conversation, it's simpler but could be optimized
 			m.chat.viewport.SetContent(strings.Join(m.chat.messages, "\n"))
 			m.chat.textarea.Reset()
 			m.chat.viewport.GotoBottom()
@@ -481,7 +546,7 @@ func (m model) switchToChat() model {
 			user = "You: "
 		case openai.ChatMessageRoleAssistant:
 			style = m.blueStyle
-			user = "Bot: "
+			user = "Bot: " // TODO : the color here and in the update are not coherent
 
 		}
 		m.chat.messages = append(m.chat.messages, style.Render(user)+msg.Content)
@@ -490,7 +555,7 @@ func (m model) switchToChat() model {
 	return m
 }
 
-// SAVE
+// SAVE - View to save the conversation. -> Conversation
 
 func initialSave() saveModel {
 	it := textinput.New()
@@ -528,6 +593,8 @@ func (m model) updateSave(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.err = append(m.err, err)
 			}
 			m = m.switchToConv()
+		case tea.KeyCtrlZ:
+			m = m.switchToChat() // TODO : test
 		}
 	}
 	m.save.texting, cmd = m.save.texting.Update(msg)

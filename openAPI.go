@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
-	"github.com/sashabaranov/go-openai"
 	"os"
+	"strings"
+
+	"github.com/sashabaranov/go-openai"
 )
 
 const (
@@ -16,7 +18,7 @@ type (
 		Model     string                         `json:"model"`
 		Name      string                         `json:"name"`
 		HasChange bool                           `json:"has_change"`
-		Messages  []openai.ChatCompletionMessage `json:"messages"`
+		Messages  []openai.ChatCompletionMessage `json:"messages"` // TODO : generalize for compatibility with other models
 	}
 
 	Key string
@@ -24,19 +26,20 @@ type (
 
 var key Key = ""
 
+// GetKey NOTE : Lazy load
 func GetKey() (Key, error) {
 	if key == "" {
 		data, err := os.ReadFile("key")
 		if err != nil {
 			return "", err
 		}
-		key = Key(data)
+		key = Key(strings.TrimRight(string(data), "\n"))
 	}
 	return key, nil
 }
 
-// Invalid TODO : Invalid key on every error or need change
-// Should never be used outside a function with a malloc
+// Invalid TODO : invalid key on every error or need change
+// Invalid NOTE : Should never be used outside a function with a malloc
 func (key *Key) Invalid() bool {
 	if *key == "" {
 		return false
@@ -100,8 +103,7 @@ func (conv *Conversation) ChatCompletionSize(question string, maxTokens int) (op
 	conv.Messages = append(conv.Messages, resp.Choices[0].Message)
 	conv.HasChange = true
 
-	// Todo : is there a choices 0 in case of err ?
-	// TODO : we add the messages to the struct but don't return it
+	// NOTE : is there a choices 0 in case of err ?
 	return resp.Choices[0].FinishReason, err
 }
 

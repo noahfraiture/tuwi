@@ -7,6 +7,8 @@ import (
 
 const dbPath = "./db/"
 
+var dbPathCreated = false
+
 type Conversations map[string]Conversation
 
 func readConversation(id string) (Conversation, error) {
@@ -81,7 +83,26 @@ func (conversations *Conversations) GetConversation(id string) (Conversation, er
 	return conv, nil
 }
 
+func createIfNotExist(path string) error {
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		err := os.MkdirAll(path, 0755)
+		if err != nil {
+			return err
+		}
+	}
+	dbPathCreated = true
+	return nil
+}
+
 func (conv *Conversation) SaveConversation() error {
+
+	// WARN : not very efficient or thread safe
+	if !dbPathCreated {
+		err := createIfNotExist(dbPath)
+		if err != nil {
+			return err
+		}
+	}
 	conv.HasChange = false
 	file := dbPath + conv.ID + ".json"
 	jsonConv, err := json.Marshal(conv)
