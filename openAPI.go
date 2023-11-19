@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/sashabaranov/go-openai"
@@ -12,29 +14,39 @@ const (
 	MaxTokens = 100
 )
 
-type (
-	Conversation struct {
-		ID        string                         `json:"id"`
-		Model     string                         `json:"model"`
-		Name      string                         `json:"name"`
-		HasChange bool                           `json:"has_change"`
-		Messages  []openai.ChatCompletionMessage `json:"messages"` // TODO : generalize for compatibility with other models
-	}
-
-	Key string
-)
+type Key string
 
 var key Key = ""
 
+func createKey(key string) error {
+	return os.WriteFile("key", []byte(key), 0644)
+}
+
 // GetKey NOTE : Lazy load
 func GetKey() (Key, error) {
-	if key == "" {
-		data, err := os.ReadFile("key")
-		if err != nil {
-			return "", err
-		}
-		key = Key(strings.TrimRight(string(data), "\n"))
+	// Key already loaded
+	if key != "" {
+		return key, nil
 	}
+
+	// Key file doesn't exist
+	if _, err := os.Stat("key"); os.IsNotExist(err) {
+		return "", errors.New("key not found")
+	}
+
+	// Key file exist but is invalid
+	data, err := os.ReadFile("key")
+	if err != nil {
+		return "", err
+	}
+	tmpKey := strings.TrimRight(string(data), "\n")
+	regex := regexp.MustCompile(`^sk-[a-zA-Z0-9]{48}$`)
+	if !regex.MatchString(tmpKey) {
+		return "", errors.New("key is invalid")
+	}
+
+	// Key file exist and is valid
+	key = Key(tmpKey)
 	return key, nil
 }
 
@@ -74,10 +86,10 @@ func (openClient *OpenClient) Invalid() bool {
 	return ok
 }
 
-func (conv *Conversation) ChatCompletionSize(question string, maxTokens int) (openai.FinishReason, error) {
+func (conv *Conversation) ChatCompletionSize(question string, maxTokens int, model string) error {
 	client, err := GetClient()
 	if err != nil {
-		return "", err
+		return err
 	}
 	ctx := context.Background()
 
@@ -87,26 +99,27 @@ func (conv *Conversation) ChatCompletionSize(question string, maxTokens int) (op
 	}
 
 	req := openai.ChatCompletionRequest{
-		Model:     conv.Model,
+		Model:     model,
 		MaxTokens: maxTokens,
-		Messages:  append(conv.Messages, newQuestion),
+		Messages:  append(conv.openaiMessages(), newQuestion),
 		Stream:    false,
 	}
 
 	resp, err := client.CreateChatCompletion(ctx, req)
 	if err != nil {
-		return "", err
+		return err
 	}
 
 	// TODO : In which case it should not store the question and the answer ?
-	conv.Messages = append(conv.Messages, newQuestion)
-	conv.Messages = append(conv.Messages, resp.Choices[0].Message)
+	conv.Messages = append(conv.Messages, userOpenaiMessage(newQuestion).ToMessage())
+	conv.Messages = append(conv.Messages, gptMessage(resp.Choices[0]).ToMessage(model))
 	conv.HasChange = true
+	conv.LastModel = model
 
 	// NOTE : is there a choices 0 in case of err ?
-	return resp.Choices[0].FinishReason, err
+	return err
 }
 
-func (conv *Conversation) ChatCompletion(question string) (openai.FinishReason, error) {
-	return conv.ChatCompletionSize(question, MaxTokens)
+func (conv *Conversation) ChatCompletion(question string, model string) error {
+	return conv.ChatCompletionSize(question, MaxTokens, model)
 }

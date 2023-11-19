@@ -101,7 +101,7 @@ func (conv itemConv) Title() string {
 	return conv.Name
 }
 func (conv itemConv) Description() string {
-	return conv.Model
+	return conv.LastModel
 }
 func (conv itemConv) FilterValue() string {
 	return conv.Name
@@ -110,6 +110,8 @@ func (conv itemConv) FilterValue() string {
 func (i aiVersion) Title() string       { return i.title }
 func (i aiVersion) Description() string { return i.desc }
 func (i aiVersion) FilterValue() string { return i.title }
+
+// MAIN
 
 func main() {
 	p := tea.NewProgram(initialModel())
@@ -130,14 +132,8 @@ func initialModel() model {
 
 		conversations: Conversations{},
 
-		renderStyle: lipgloss.NewStyle().Margin(1, 2),
-		senderStyle: lipgloss.NewStyle().Foreground(lipgloss.Color("5")),
-		redStyle:    lipgloss.NewStyle().Foreground(lipgloss.Color("1")),
-		greenStyle:  lipgloss.NewStyle().Foreground(lipgloss.Color("2")),
-		yellowStyle: lipgloss.NewStyle().Foreground(lipgloss.Color("3")),
-		blueStyle:   lipgloss.NewStyle().Foreground(lipgloss.Color("4")),
-		state:       START,
-		quitting:    false,
+		state:    START,
+		quitting: false,
 	}
 
 }
@@ -151,7 +147,12 @@ func (m model) Init() tea.Cmd {
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// TODO : if user has no key, start as key
 	if m.state == START {
-		m = m.switchToConv()
+		if _, err := GetKey(); err != nil {
+			m.err = append(m.err, err)
+			m = m.switchToKey()
+		} else {
+			m = m.switchToConv()
+		}
 	}
 
 	if m.err != nil {
@@ -204,6 +205,8 @@ func (m model) View() string {
 		return "\n See ya  !\n\n"
 	}
 	switch m.state {
+	case KEY:
+		return m.viewKey()
 	case CONV:
 		return m.viewConv()
 	case AI:
@@ -253,6 +256,10 @@ func (m model) updateKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// TODO : warning the user has no input. I could parse the input and display a cross icon until it's valid
 			}
 			// TODO : store key
+			err := createKey(m.key.content)
+			if err != nil {
+				m.err = append(m.err, err)
+			}
 			m = m.switchToConv()
 		}
 	}
@@ -298,7 +305,7 @@ func (m model) updateConv(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					m.chat.conversation = &Conversation{
 						ID:        string(randomBytes),
-						Model:     "",
+						LastModel: "",
 						Name:      "",
 						Messages:  nil,
 						HasChange: false,
@@ -330,7 +337,7 @@ func (m model) switchToConv() model {
 	listItemConv := make([]list.Item, len(m.conversations)+1)
 	listItemConv[0] = itemConv(Conversation{
 		ID:        NEWCONV,
-		Model:     "Choose your model",
+		LastModel: "Choose your model",
 		Name:      "New conversation",
 		Messages:  nil,
 		HasChange: false,
@@ -369,7 +376,7 @@ func (m model) updateAI(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyEnter:
 			if i, ok := m.ai.list.SelectedItem().(aiVersion); ok {
 				m.ai.choice = &i
-				m.chat.conversation.Model = i.title
+				m.chat.conversation.LastModel = i.title
 				m = m.switchToSystem()
 			}
 		case tea.KeyCtrlZ:
@@ -421,9 +428,11 @@ func (m model) updateSystem(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.system.content == "" {
 				m.system.content = "You are a helpful assistant\n"
 			}
-			m.chat.conversation.Messages = append(m.chat.conversation.Messages, openai.ChatCompletionMessage{
-				Role:    openai.ChatMessageRoleSystem,
-				Content: m.system.content,
+			m.chat.conversation.Messages = append(m.chat.conversation.Messages, Message{
+				Role:         openai.ChatMessageRoleSystem,
+				Content:      m.system.content,
+				FinishReason: "systemEnd",
+				Model:        "",
 			})
 			m = m.switchToChat()
 		case tea.KeyCtrlZ:
@@ -474,6 +483,7 @@ func (m model) viewChat() string {
 }
 
 func (m model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// TODO : generalize to others model by adding a parameter to select the model
 	var (
 		tiCmd tea.Cmd
 		vpCmd tea.Cmd
@@ -488,31 +498,26 @@ func (m model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyEnter:
 
 			// NOTE : We don't have to add a newline since it's already done by the textarea
-			currentMessage := m.chat.textarea.Value()
-			m.chat.messages = append(m.chat.messages, m.senderStyle.Render("You: ")+currentMessage)
+			userMessage := Message{
+				Role:         roleUser,
+				Content:      m.chat.textarea.Value(),
+				FinishReason: finishUser,
+				Model:        modelUser,
+			}
+			m.chat.messages = append(m.chat.messages, userMessage.render())
+			m.chat.conversation.Messages = append(m.chat.conversation.Messages, userMessage)
 
-			finishReason, err := m.chat.conversation.ChatCompletion(m.chat.textarea.Value())
+			// TODO : could create a function to avoid duplicate code and append err when exist
+			err := m.chat.conversation.ChatCompletion(m.chat.textarea.Value(), m.chat.conversation.LastModel)
 			if err != nil {
 				m.err = append(m.err, err)
 				return m, nil
 			}
-			var style lipgloss.Style
-			switch finishReason {
-			case openai.FinishReasonStop:
-				style = m.greenStyle
-			case openai.FinishReasonLength:
-				style = m.yellowStyle
-			case openai.FinishReasonContentFilter:
-				style = m.redStyle
-			default:
-				style = m.blueStyle
-			}
 
-			// NOTE : Here we do have to add the newline since the response of openAI have no newline
-			botMessage := m.chat.conversation.Messages[len(m.chat.conversation.Messages)-1].Content + "\n"
-			m.chat.messages = append(m.chat.messages, style.Render("Bot : ")+botMessage)
+			botMessage := m.chat.conversation.Messages[len(m.chat.conversation.Messages)-1]
+			m.chat.messages = append(m.chat.messages, botMessage.render())
 
-			// TODO :  We reload the entiere conversation, it's simpler but could be optimized
+			// TODO :  We reload the entire conversation, it's simpler but could be optimized
 			m.chat.viewport.SetContent(strings.Join(m.chat.messages, "\n"))
 			m.chat.textarea.Reset()
 			m.chat.viewport.GotoBottom()
@@ -534,22 +539,7 @@ func (m model) switchToChat() model {
 	m.state = CHAT
 	m.chat.messages = []string{}
 	for _, msg := range m.chat.conversation.Messages {
-		var style lipgloss.Style
-		var user string
-		switch msg.Role {
-		// TODO : finishReason is missing from the struct, so the color is not right
-		case openai.ChatMessageRoleSystem:
-			style = m.greenStyle
-			user = "System: "
-		case openai.ChatMessageRoleUser:
-			style = m.senderStyle
-			user = "You: "
-		case openai.ChatMessageRoleAssistant:
-			style = m.blueStyle
-			user = "Bot: " // TODO : the color here and in the update are not coherent
-
-		}
-		m.chat.messages = append(m.chat.messages, style.Render(user)+msg.Content)
+		m.chat.messages = append(m.chat.messages, msg.render())
 	}
 	m.chat.viewport.SetContent(strings.Join(m.chat.messages, "\n"))
 	return m
