@@ -83,7 +83,7 @@ func (message userOpenaiMessage) toMessage() Message {
 func (message gptMessage) toMessage(model string) Message {
 	return Message{
 		Role:         message.Message.Role,
-		Content:      message.Message.Content,
+		Content:      message.Message.Content + "\n",
 		FinishReason: finishReason(message.FinishReason),
 		Model:        model,
 	}

@@ -330,7 +330,7 @@ func (m model) switchToConv() model {
 	m.state = CONV
 	m.conv.choice = nil
 
-	err := m.conversations.UpdateConversations()
+	err := m.conversations.updateConversations()
 	if err != nil {
 		m.err = append(m.err, err)
 	}
@@ -482,6 +482,7 @@ func (m model) viewChat() string {
 	)
 }
 
+// TODO : back send to system. Doesn't have logic
 func (m model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// TODO : generalize to others model by adding a parameter to select the model
 	var (
@@ -508,6 +509,8 @@ func (m model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.chat.conversation.Messages = append(m.chat.conversation.Messages, userMessage)
 
 			// TODO : could create a function to avoid duplicate code and append err when exist
+			// The answer is add to the conversation if the request is a success.
+			// The point is to handle the error in the chatCompletion function like a black box
 			err := m.chat.conversation.chatCompletion(m.chat.textarea.Value(), m.chat.conversation.LastModel)
 			if err != nil {
 				m.err = append(m.err, err)
@@ -546,6 +549,7 @@ func (m model) switchToChat() model {
 }
 
 // SAVE - View to save the conversation. -> Conversation
+// TODO : BUG next window does not show well things
 
 func initialSave() saveModel {
 	it := textinput.New()
@@ -561,7 +565,7 @@ func initialSave() saveModel {
 
 func (m model) viewSave() string {
 	return fmt.Sprintf(
-		"Enter system message \n\n%s\n\n%s",
+		"Enter the name of the conversation \n\n%s\n\n%s",
 		m.save.texting.View(),
 		"(esc to quit)",
 	) + "\n"
