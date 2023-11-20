@@ -93,22 +93,17 @@ func (openClient *OpenClient) invalid() bool {
 	return ok
 }
 
-func (conv *Conversation) chatCompletionSize(question string, maxTokens int, model string) error {
+func (conv *Conversation) chatCompletionSize(maxTokens int, model string) error {
 	client, err := GetClient()
 	if err != nil {
 		return err
 	}
 	ctx := context.Background()
 
-	newQuestion := openai.ChatCompletionMessage{
-		Role:    openai.ChatMessageRoleUser,
-		Content: question,
-	}
-
 	req := openai.ChatCompletionRequest{
 		Model:     model,
 		MaxTokens: maxTokens,
-		Messages:  append(conv.openaiMessages(), newQuestion),
+		Messages:  conv.openaiMessages(), //Note : This already contains the question
 		Stream:    false,
 	}
 
@@ -118,7 +113,6 @@ func (conv *Conversation) chatCompletionSize(question string, maxTokens int, mod
 	}
 
 	// TODO : In which case it should not store the question and the answer ?
-	conv.Messages = append(conv.Messages, userOpenaiMessage(newQuestion).toMessage())
 	conv.Messages = append(conv.Messages, gptMessage(resp.Choices[0]).toMessage(model))
 	conv.HasChange = true
 	conv.LastModel = model
@@ -127,10 +121,10 @@ func (conv *Conversation) chatCompletionSize(question string, maxTokens int, mod
 	return err
 }
 
-func (conv *Conversation) chatCompletion(question string, model string) error {
-	return conv.chatCompletionSize(question, MaxTokens, model)
+func (conv *Conversation) chatCompletion(model string) error {
+	return conv.chatCompletionSize(MaxTokens, model)
 }
 
-func (conv *Conversation) chatCompletionNoModel(question string) error {
-	return conv.chatCompletion(question, conv.LastModel)
+func (conv *Conversation) chatCompletionNoModel() error {
+	return conv.chatCompletion(conv.LastModel)
 }

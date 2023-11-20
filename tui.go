@@ -518,7 +518,7 @@ func (m model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// TODO : could create a function to avoid duplicate code and append err when exist
 			// The answer is add to the conversation if the request is a success.
 			// The point is to handle the error in the chatCompletion function like a black box
-			err := m.chat.conversation.chatCompletion(m.chat.textarea.Value(), m.chat.conversation.LastModel)
+			err := m.chat.conversation.chatCompletion(m.chat.textarea.Value())
 			if err != nil {
 				m.err = append(m.err, err)
 				return m, nil
