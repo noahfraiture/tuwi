@@ -33,6 +33,8 @@ type (
 	// MAIN MODEL
 	// TODO : could use factory to remove duplicate code ?
 	model struct {
+		// TODO : add inheritance
+		// Sub struct
 		key    keyModel
 		conv   convModel
 		ai     aiModel
@@ -437,7 +439,7 @@ func (m model) updateSystem(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.chat.conversation.Messages = append(m.chat.conversation.Messages, Message{
 				Role:         openai.ChatMessageRoleSystem,
-				Content:      m.system.content,
+				Content:      m.system.content, // TODO : newline missing
 				FinishReason: "systemEnd",
 				Model:        "",
 			})
