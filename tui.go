@@ -147,7 +147,7 @@ func (m model) Init() tea.Cmd {
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// TODO : if user has no key, start as key
 	if m.state == START {
-		if _, err := GetKey(); err != nil {
+		if _, err := getKey(); err != nil {
 			m.err = append(m.err, err)
 			m = m.switchToKey()
 		} else {
@@ -237,8 +237,15 @@ func initialKey() keyModel {
 }
 
 func (m model) viewKey() string {
+	var icon rune
+	if validKey(m.key.texting.Value()) {
+		icon = '\uf00c'
+	} else {
+		icon = '\ue654'
+	}
 	return fmt.Sprintf(
-		"Enter your key \n\n%s\n\n%s",
+		"Enter your key \n\n%q %s\n\n%s",
+		icon,
 		m.key.texting.View(),
 		"(esc to quit)",
 	) + "\n"

@@ -18,6 +18,11 @@ type Key string
 
 var key Key = ""
 
+func validKey(key string) bool {
+	regex := regexp.MustCompile(`^sk-[a-zA-Z0-9]{48}$`)
+	return regex.MatchString(key)
+}
+
 func createKey(key string) error {
 	return os.WriteFile("key", []byte(key), 0644)
 }
@@ -39,9 +44,11 @@ func getKey() (Key, error) {
 	if err != nil {
 		return "", err
 	}
+	if !validKey(string(data)) {
+		return "", errors.New("key is invalid")
+	}
 	tmpKey := strings.TrimRight(string(data), "\n")
-	regex := regexp.MustCompile(`^sk-[a-zA-Z0-9]{48}$`)
-	if !regex.MatchString(tmpKey) {
+	if !validKey(tmpKey) {
 		return "", errors.New("key is invalid")
 	}
 
