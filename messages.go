@@ -23,7 +23,7 @@ type (
 		Name      string    `json:"name"`
 		HasChange bool      `json:"has_change"`
 		LastModel string    `json:"last_model"`
-		Messages  []Message `json:"messages"` // TODO : generalize for compatibility with other models
+		Messages  []Message `json:"messages"`
 	}
 
 	userOpenaiMessage openai.ChatCompletionMessage
@@ -71,7 +71,7 @@ func (conv *Conversation) openaiMessages() []openai.ChatCompletionMessage {
 	return list
 }
 
-func (message userOpenaiMessage) ToMessage() Message {
+func (message userOpenaiMessage) toMessage() Message {
 	return Message{
 		Role:         message.Role,
 		Content:      message.Content,
@@ -80,7 +80,7 @@ func (message userOpenaiMessage) ToMessage() Message {
 	}
 }
 
-func (message gptMessage) ToMessage(model string) Message {
+func (message gptMessage) toMessage(model string) Message {
 	return Message{
 		Role:         message.Message.Role,
 		Content:      message.Message.Content,

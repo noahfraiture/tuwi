@@ -52,7 +52,7 @@ func getIDS() ([]string, error) {
 	return ids, nil
 }
 
-func (conversations *Conversations) UpdateConversations() error {
+func (conversations *Conversations) updateConversations() error {
 	ids, err := getIDS()
 	if err != nil {
 		return err
@@ -70,7 +70,7 @@ func (conversations *Conversations) UpdateConversations() error {
 	return nil
 }
 
-func (conversations *Conversations) GetConversation(id string) (Conversation, error) {
+func (conversations *Conversations) getConversation(id string) (Conversation, error) {
 	conv, ok := (*conversations)[id]
 	if !ok || conv.HasChange {
 		var err error
@@ -94,7 +94,7 @@ func createIfNotExist(path string) error {
 	return nil
 }
 
-func (conv *Conversation) SaveConversation() error {
+func (conv *Conversation) saveConversation() error {
 
 	// WARN : not very efficient or thread safe
 	if !dbPathCreated {
@@ -118,6 +118,6 @@ func (conv *Conversation) SaveConversation() error {
 	return nil
 }
 
-func (conv *Conversation) Invalid() {
+func (conv *Conversation) invalid() {
 	conv.HasChange = true
 }

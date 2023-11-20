@@ -8,7 +8,7 @@ import (
 )
 
 func testGetKey() error {
-	content, err := GetKey()
+	content, err := getKey()
 	if err != nil {
 		return err
 	}
@@ -28,10 +28,10 @@ func Test_GetKey(t *testing.T) {
 }
 
 func TestKey_Invalid(t *testing.T) {
-	if res := key.Invalid(); !res {
+	if res := key.invalid(); !res {
 		t.Error("The key was empty before invalidating")
 	}
-	if res := key.Invalid(); res {
+	if res := key.invalid(); res {
 		t.Error("The key plain after an invalidation")
 	}
 	if string(key) != "" {
@@ -60,10 +60,10 @@ func Test_GetClient(t *testing.T) {
 }
 
 func TestOpenClient_Invalid(t *testing.T) {
-	if res := openClient.Invalid(); !res {
+	if res := openClient.invalid(); !res {
 		t.Error("The client was empty before invalidating")
 	}
-	if res := openClient.Invalid(); res {
+	if res := openClient.invalid(); res {
 		t.Error("The client plain after an invalidation")
 	}
 	if openClient.client != nil {
@@ -73,22 +73,27 @@ func TestOpenClient_Invalid(t *testing.T) {
 
 func TestConversation_ChatCompletion_Empty(t *testing.T) {
 	// TODO API HAS CHANGE, ERROR
-	conversation := Conversation{
-		ID:    "conv1",
-		Model: openai.GPT3Dot5Turbo,
-		Name:  "Conversation 1",
-		Messages: []openai.ChatCompletionMessage{
-			{Role: openai.ChatMessageRoleSystem,
-				Content: "You are a cool friend"}, // DOESN'T WORK WITH NO MESSAGE. ERROR 'too short'
+	choice := openai.ChatCompletionChoice{
+		Index: 0,
+		Message: openai.ChatCompletionMessage{
+			Role:    openai.ChatMessageRoleSystem,
+			Content: "You are an helpful assistant",
 		},
+		FinishReason: "",
+	}
+	conversation := Conversation{
+		ID:        "conv1",
+		LastModel: openai.GPT3Dot5Turbo,
+		Name:      "Conversation 1",
+		Messages:  []Message{gptMessage(choice).toMessage(openai.GPT3Dot5Turbo)},
 		HasChange: false,
 	}
-	finishReason, err := conversation.ChatCompletion("Hello")
+	err := conversation.chatCompletionNoModel("Hello")
 	if err != nil {
 		t.Error(err)
 	}
 	fmt.Printf("The response : %s\n", conversation.Messages[len(conversation.Messages)-1].Content)
-	if finishReason != openai.FinishReasonStop {
+	if conversation.Messages[len(conversation.Messages)-1].FinishReason != finishReason(openai.FinishReasonStop) {
 		t.Error("The conversation should have stopped")
 	}
 	if len(conversation.Messages) != 3 {
@@ -100,27 +105,44 @@ func TestConversation_ChatCompletion_Empty(t *testing.T) {
 }
 
 func TestConversation_ChatCompletion_Full(t *testing.T) {
-	conversation := Conversation{
-		ID:    "conv2",
-		Model: openai.GPT3Dot5Turbo,
-		Name:  "Conversation 2",
-		Messages: []openai.ChatCompletionMessage{
-			{Role: openai.ChatMessageRoleSystem,
-				Content: "You are a cool friend"},
-			{Role: openai.ChatMessageRoleUser,
-				Content: "Hey"},
-			{Role: openai.ChatMessageRoleAssistant,
-				Content: "Yo"},
+	choices := []openai.ChatCompletionChoice{
+		{
+			Message: openai.ChatCompletionMessage{
+				Role:    openai.ChatMessageRoleSystem,
+				Content: "You are a cool friend",
+			},
 		},
+		{
+			Message: openai.ChatCompletionMessage{
+				Role:    openai.ChatMessageRoleUser,
+				Content: "Hey",
+			},
+		},
+		{
+			Message: openai.ChatCompletionMessage{
+				Role:    openai.ChatMessageRoleAssistant,
+				Content: "Yo",
+			},
+		},
+	}
+	messages := make([]Message, 3, 5)
+	for i, choice := range choices {
+		messages[i] = gptMessage(choice).toMessage(openai.GPT3Dot5Turbo)
+	}
+	conversation := Conversation{
+		ID:        "conv2",
+		LastModel: openai.GPT3Dot5Turbo,
+		Name:      "Conversation 2",
+		Messages:  messages,
 		HasChange: false,
 	}
-	finishReason, err := conversation.ChatCompletion("Say 'banana'")
+	err := conversation.chatCompletionNoModel("Say 'banana'")
 	if err != nil {
 		t.Error(err)
 	}
 	fmt.Printf("The response : %s\n", conversation.Messages[len(conversation.Messages)-1].Content)
-	if finishReason != openai.FinishReasonStop {
-		t.Errorf("The conversation should have stopped : %s", finishReason)
+	if conversation.Messages[len(conversation.Messages)-1].FinishReason != finishReason(openai.FinishReasonStop) {
+		t.Errorf("The conversation should have stopped : %s", conversation.Messages[len(conversation.Messages)-1].FinishReason)
 	}
 	if len(conversation.Messages) != 5 {
 		t.Error("The conversation should have 5 messages")
@@ -131,28 +153,45 @@ func TestConversation_ChatCompletion_Full(t *testing.T) {
 }
 
 func TestConversation_ChatCompletion_TooLong(t *testing.T) {
-	conversation := Conversation{
-		ID:    "conv3",
-		Model: openai.GPT3Dot5Turbo,
-		Name:  "Conversation 3",
-		Messages: []openai.ChatCompletionMessage{
-			{Role: openai.ChatMessageRoleSystem,
-				Content: "You are a cool friend"},
-			{Role: openai.ChatMessageRoleUser,
-				Content: "Hey"},
-			{Role: openai.ChatMessageRoleAssistant,
-				Content: "Yo"},
+	choices := []openai.ChatCompletionChoice{
+		{
+			Message: openai.ChatCompletionMessage{
+				Role:    openai.ChatMessageRoleSystem,
+				Content: "You are a cool friend",
+			},
 		},
+		{
+			Message: openai.ChatCompletionMessage{
+				Role:    openai.ChatMessageRoleUser,
+				Content: "Hey",
+			},
+		},
+		{
+			Message: openai.ChatCompletionMessage{
+				Role:    openai.ChatMessageRoleAssistant,
+				Content: "Yo",
+			},
+		},
+	}
+	messages := make([]Message, 3, 5)
+	for i, choice := range choices {
+		messages[i] = gptMessage(choice).toMessage(openai.GPT3Dot5Turbo)
+	}
+	conversation := Conversation{
+		ID:        "conv3",
+		LastModel: openai.GPT3Dot5Turbo,
+		Name:      "Conversation 3",
+		Messages:  messages,
 		HasChange: false,
 	}
-	finishReason, err := conversation.ChatCompletionSize("how do you do ? I do fine for my self, "+
-		"I think the most important thing here is that you feel good too. "+
-		"I would like you to explain to me in a few page how you feel", 10)
+	err := conversation.chatCompletionNoModel("how do you do ? I do fine for my self, " +
+		"I think the most important thing here is that you feel good too. " +
+		"I would like you to explain to me in a few page how you feel")
 	if err != nil {
 		t.Error(err)
 	}
 	fmt.Printf("The response : %s\n", conversation.Messages[len(conversation.Messages)-1].Content)
-	if finishReason != openai.FinishReasonLength {
+	if conversation.Messages[len(conversation.Messages)-1].FinishReason != finishReason(openai.FinishReasonLength) {
 		t.Error("The conversation should have stopped")
 	}
 	if len(conversation.Messages) != 5 {

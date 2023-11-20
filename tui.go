@@ -508,7 +508,7 @@ func (m model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.chat.conversation.Messages = append(m.chat.conversation.Messages, userMessage)
 
 			// TODO : could create a function to avoid duplicate code and append err when exist
-			err := m.chat.conversation.ChatCompletion(m.chat.textarea.Value(), m.chat.conversation.LastModel)
+			err := m.chat.conversation.chatCompletion(m.chat.textarea.Value(), m.chat.conversation.LastModel)
 			if err != nil {
 				m.err = append(m.err, err)
 				return m, nil
@@ -578,7 +578,7 @@ func (m model) updateSave(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.save.content != "" {
 				m.chat.conversation.Name = m.save.content
 			}
-			err := m.chat.conversation.SaveConversation()
+			err := m.chat.conversation.saveConversation()
 			if err != nil {
 				m.err = append(m.err, err)
 			}

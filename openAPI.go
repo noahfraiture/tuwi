@@ -22,8 +22,8 @@ func createKey(key string) error {
 	return os.WriteFile("key", []byte(key), 0644)
 }
 
-// GetKey NOTE : Lazy load
-func GetKey() (Key, error) {
+// getKey NOTE : Lazy load
+func getKey() (Key, error) {
 	// Key already loaded
 	if key != "" {
 		return key, nil
@@ -50,9 +50,9 @@ func GetKey() (Key, error) {
 	return key, nil
 }
 
-// Invalid TODO : invalid key on every error or need change
-// Invalid NOTE : Should never be used outside a function with a malloc
-func (key *Key) Invalid() bool {
+// invalid TODO : invalid key on every error or need change
+// invalid NOTE : Should never be used outside a function with a malloc
+func (key *Key) invalid() bool {
 	if *key == "" {
 		return false
 	}
@@ -68,7 +68,7 @@ var openClient = OpenClient{}
 
 func GetClient() (*openai.Client, error) {
 	if openClient.client == nil {
-		key, err := GetKey()
+		key, err := getKey()
 		if err != nil {
 			return nil, err
 		}
@@ -77,7 +77,7 @@ func GetClient() (*openai.Client, error) {
 	return openClient.client, nil
 }
 
-func (openClient *OpenClient) Invalid() bool {
+func (openClient *OpenClient) invalid() bool {
 	ok := true
 	if openClient.client == nil {
 		ok = false
@@ -86,7 +86,7 @@ func (openClient *OpenClient) Invalid() bool {
 	return ok
 }
 
-func (conv *Conversation) ChatCompletionSize(question string, maxTokens int, model string) error {
+func (conv *Conversation) chatCompletionSize(question string, maxTokens int, model string) error {
 	client, err := GetClient()
 	if err != nil {
 		return err
@@ -111,8 +111,8 @@ func (conv *Conversation) ChatCompletionSize(question string, maxTokens int, mod
 	}
 
 	// TODO : In which case it should not store the question and the answer ?
-	conv.Messages = append(conv.Messages, userOpenaiMessage(newQuestion).ToMessage())
-	conv.Messages = append(conv.Messages, gptMessage(resp.Choices[0]).ToMessage(model))
+	conv.Messages = append(conv.Messages, userOpenaiMessage(newQuestion).toMessage())
+	conv.Messages = append(conv.Messages, gptMessage(resp.Choices[0]).toMessage(model))
 	conv.HasChange = true
 	conv.LastModel = model
 
@@ -120,6 +120,10 @@ func (conv *Conversation) ChatCompletionSize(question string, maxTokens int, mod
 	return err
 }
 
-func (conv *Conversation) ChatCompletion(question string, model string) error {
-	return conv.ChatCompletionSize(question, MaxTokens, model)
+func (conv *Conversation) chatCompletion(question string, model string) error {
+	return conv.chatCompletionSize(question, MaxTokens, model)
+}
+
+func (conv *Conversation) chatCompletionNoModel(question string) error {
+	return conv.chatCompletion(question, conv.LastModel)
 }

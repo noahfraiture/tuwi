@@ -8,7 +8,7 @@ import (
 var (
 	c0 = Conversation{
 		ID:        "c0",
-		Model:     openai.GPT3Dot5Turbo,
+		LastModel: openai.GPT3Dot5Turbo,
 		Name:      "jon",
 		Messages:  nil,
 		HasChange: false,
@@ -16,17 +16,17 @@ var (
 
 	c1 = Conversation{
 		ID:        "c1",
-		Model:     openai.GPT3Dot5Turbo,
+		LastModel: openai.GPT3Dot5Turbo,
 		Name:      "janne",
 		Messages:  nil,
 		HasChange: true,
 	}
 
 	c2 = Conversation{
-		ID:    "c2",
-		Model: openai.GPT3Dot5Turbo,
-		Name:  "jon",
-		Messages: []openai.ChatCompletionMessage{
+		ID:        "c2",
+		LastModel: openai.GPT3Dot5Turbo,
+		Name:      "jon",
+		Messages: []Message{
 			{
 				Role:    openai.ChatMessageRoleUser,
 				Content: "hey",
@@ -44,7 +44,7 @@ func (conv *Conversation) isEqual(other Conversation) bool {
 	if conv.ID != other.ID {
 		return false
 	}
-	if conv.Model != other.Model {
+	if conv.LastModel != other.LastModel {
 		return false
 	}
 	if conv.Name != other.Name {
@@ -69,15 +69,15 @@ func TestConversation_SaveConversationAndRead(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	err = c0.SaveConversation()
+	err = c0.saveConversation()
 	if err != nil {
 		t.Error(err)
 	}
-	err = c1.SaveConversation()
+	err = c1.saveConversation()
 	if err != nil {
 		t.Error(err)
 	}
-	err = c2.SaveConversation()
+	err = c2.saveConversation()
 	if err != nil {
 		t.Error(err)
 	}
@@ -111,15 +111,15 @@ func TestConversations_GetConversation(t *testing.T) {
 		t.Error(err)
 	}
 	conversations := make(Conversations)
-	err = c0.SaveConversation()
-	conv, err := conversations.GetConversation(c0.ID)
+	err = c0.saveConversation()
+	conv, err := conversations.getConversation(c0.ID)
 	if err != nil {
 		t.Error(err)
 	}
 	if !conv.isEqual(c0) {
 		t.Error("c0 is not c0")
 	}
-	conv, err = conversations.GetConversation(c0.ID)
+	conv, err = conversations.getConversation(c0.ID)
 	if err != nil {
 		t.Error(err)
 	}
