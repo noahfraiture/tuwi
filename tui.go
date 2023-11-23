@@ -116,6 +116,13 @@ func (i aiVersion) Title() string       { return i.title }
 func (i aiVersion) Description() string { return i.desc }
 func (i aiVersion) FilterValue() string { return i.title }
 
+func (m model) addErr(err error) model {
+	if err != nil {
+		m.err = append(m.err, err)
+	}
+	return m
+}
+
 // MAIN
 
 func main() {
@@ -139,6 +146,7 @@ func initialModel() model {
 
 		state:    START,
 		quitting: false,
+		err:      make([]error, 0),
 	}
 
 }
@@ -153,19 +161,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// TODO : if user has no key, start as key
 	if m.state == START {
 		if _, err := getKey(); err != nil {
-			m.err = append(m.err, err)
+			m = m.addErr(err)
 			m = m.switchToKey()
 		} else {
 			m = m.switchToConv()
 		}
 	}
 
-	if m.err != nil {
-		for _, err := range m.err {
-			fmt.Println(err)
-		}
-		m.err = nil
-	}
+	// TODO : section to read error or add to file
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -183,7 +186,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.ai.list.SetSize(msg.Width-h, msg.Height-v)
 		break
 	case error:
-		m.err = append(m.err, msg)
+		m = m.addErr(msg)
 	}
 
 	switch m.state {
@@ -200,7 +203,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case SAVE:
 		return m.updateSave(msg)
 	default:
-		m.err = append(m.err, errors.New("State doesn't exist\n"))
+		m = m.addErr(errors.New("State doesn't exist\n"))
 		return m, tea.Quit
 	}
 }
@@ -234,7 +237,7 @@ func initialKey() keyModel {
 	it.Placeholder = "sk-xxxxxxxx\n"
 	it.CharLimit = 156
 	it.Width = 20
-	it.Focus() // TODO : has the order any importance ?
+	it.Focus()
 	return keyModel{
 		texting: it,
 		content: "",
@@ -249,11 +252,11 @@ func (m model) viewKey() string {
 		icon = '\ue654'
 	}
 	return fmt.Sprintf(
-		"Enter your key \n\n%q %s\n\n%s",
+		"Enter your key \n\n%q %s\n\n%s\n",
 		icon,
 		m.key.texting.View(),
 		"(esc to quit)",
-	) + "\n"
+	)
 }
 
 func (m model) updateKey(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -264,15 +267,12 @@ func (m model) updateKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.Type {
 		case tea.KeyEnter:
 			m.key.content = m.key.texting.Value()
-			if m.key.content == "" {
-				// TODO : warning the user has no input. I could parse the input and display a cross icon until it's valid
+			if validKey(m.key.content) {
+				m = m.addErr(createKey(m.key.content))
+				m = m.switchToConv()
+			} else {
+				m = m.addErr(errors.New("invalid key submitted"))
 			}
-			// TODO : store key
-			err := createKey(m.key.content)
-			if err != nil {
-				m.err = append(m.err, err)
-			}
-			m = m.switchToConv()
 		}
 	}
 	m.key.texting, cmd = m.key.texting.Update(msg)
@@ -282,7 +282,7 @@ func (m model) updateKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m model) switchToKey() model {
 	m.state = KEY
 	m.key.content = ""
-	m.key.texting.Reset() // TODO : is it necessary ?
+	m.key.texting.Reset() // NOTE : is it necessary ?
 	return m
 }
 
@@ -298,20 +298,16 @@ func initialConv() convModel {
 }
 
 func (m model) viewConv() string {
-	return m.conv.style.Render(m.conv.list.View()) + "\n"
+	return fmt.Sprintf("%s\n", m.conv.style.Render(m.conv.list.View()))
 }
 
 func (m model) updateConv(msg tea.Msg) (tea.Model, tea.Cmd) {
-	// If the user choose the NEWCONV conversation, we create a new one
-	// Else we replace the existing one by the chosen one and go directly to the chat
-
 	if msg, ok := msg.(tea.KeyMsg); ok {
 		switch msg.Type {
 		case tea.KeyEnter:
 			if i, ok := m.conv.list.SelectedItem().(itemConv); ok {
 				if i.ID == NEWCONV {
-					// TODO choice : if we go back here, will it reset the conversation ? If yes we should reset the conversation here or in switchToChat
-					m.conv.choice = nil // NOTE : reset the choice if one was selected before
+					m.conv.choice = nil
 					m = m.switchToAI()
 				} else {
 					m.chat.conversation = (*Conversation)(&i)
@@ -331,10 +327,7 @@ func (m model) switchToConv() model {
 	m.state = CONV
 	m.conv.choice = nil
 
-	err := m.conversations.updateConversations()
-	if err != nil {
-		m.err = append(m.err, err)
-	}
+	m = m.addErr(m.conversations.updateConversations())
 	listItemConv := make([]list.Item, len(m.conversations)+1)
 	listItemConv[0] = itemConv(Conversation{
 		ID:        NEWCONV,
@@ -357,10 +350,14 @@ func (m model) switchToConv() model {
 func initialAI() aiModel {
 	return aiModel{
 		list: list.New([]list.Item{
-			aiVersion{title: openai.GPT4, // TODO reformat this like said in jimmy's message
-				desc: "PRICE"}, // TODO PRICE
-			aiVersion{title: openai.GPT3Dot5Turbo,
-				desc: "PRICE"},
+			aiVersion{
+				title: openai.GPT4,
+				desc:  "$0.03 / 1K tokens",
+			},
+			aiVersion{
+				title: openai.GPT3Dot5Turbo,
+				desc:  "$0.002 / 1K tokens",
+			},
 		}, list.NewDefaultDelegate(), 0, 0),
 		style:  lipgloss.NewStyle().Margin(1, 2),
 		choice: nil,
@@ -368,7 +365,7 @@ func initialAI() aiModel {
 }
 
 func (m model) viewAI() string {
-	return m.ai.style.Render(m.ai.list.View()) + "\n"
+	return fmt.Sprintf("%s\n", m.ai.style.Render(m.ai.list.View()))
 }
 
 func (m model) updateAI(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -403,7 +400,7 @@ func initialSystem() systemModel {
 	it.Placeholder = "You are a helpful assistant\n"
 	it.CharLimit = 156
 	it.Width = 20
-	it.Focus() // TODO : has the order any importance ?
+	it.Focus()
 	return systemModel{
 		texting: it,
 		content: "",
@@ -412,10 +409,10 @@ func initialSystem() systemModel {
 
 func (m model) viewSystem() string {
 	return fmt.Sprintf(
-		"Enter system message \n\n%s\n\n%s",
+		"Enter system message \n\n%s\n\n%s\n",
 		m.system.texting.View(),
 		"(esc to quit)",
-	) + "\n"
+	)
 }
 
 func (m model) updateSystem(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -441,7 +438,7 @@ func (m model) updateSystem(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m model) switchToSystem() model {
 	m.state = SYSTEM
 	m.system.content = ""
-	m.system.texting.Reset() // TODO : is it necessary ?
+	m.system.texting.Reset() // NOTE : is it necessary ?
 	return m
 }
 
@@ -477,9 +474,7 @@ func (m model) viewChat() string {
 	)
 }
 
-// TODO : back send to system. Doesn't have logic
 func (m model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
-	// TODO : generalize to others model by adding a parameter to select the model
 	var (
 		tiCmd tea.Cmd
 		vpCmd tea.Cmd
@@ -503,29 +498,21 @@ func (m model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.chat.messages = append(m.chat.messages, userMessage.render())
 			m.chat.conversation.Messages = append(m.chat.conversation.Messages, userMessage)
 
-			// TODO : could create a function to avoid duplicate code and append err when exist
-			// NOTE : Should I add a "Last conversation" if the user quit without saving ?
+			// TODO : Should I add a "Last conversation" if the user quit without saving ?
 
-			// The answer is add to the conversation if the request is a success.
-			// The point is to handle the error in the chatCompletion function like a black box
-			err := m.chat.conversation.chatCompletion(m.chat.textarea.Value())
-			if err != nil {
-				m.err = append(m.err, err)
-				return m, nil
-			}
+			// NOTE : The answer is added to the conversation if the request is a success.
+			// 		  The point is to handle the error in the chatCompletion function like a black box
+			// WARN : Since I use function to handle error, I don't have the possibility return in case of an error
+			m = m.addErr(m.chat.conversation.chatCompletion(m.chat.textarea.Value()))
 
 			botMessage := m.chat.conversation.Messages[len(m.chat.conversation.Messages)-1]
 			m.chat.messages = append(m.chat.messages, botMessage.render())
 
-			// TODO :  We reload the entire conversation, it's simpler but could be optimized
+			// WARN : We reload the entire conversation, it's simpler but could be optimized
 			m.chat.viewport.SetContent(strings.Join(m.chat.messages, "\n"))
 			m.chat.textarea.Reset()
 			m.chat.viewport.GotoBottom()
 		case tea.KeyCtrlS:
-			// TODO : move in switchToSave
-			if m.chat.conversation.Name != NEWCONV {
-				m.save.texting.Placeholder = m.chat.conversation.Name
-			}
 			m = m.switchToSave()
 			return m, nil
 		case tea.KeyCtrlZ:
@@ -560,7 +547,7 @@ func (m model) switchToChat() model {
 
 		m.chat.conversation = &Conversation{
 			ID:        string(randomBytes),
-			LastModel: m.ai.choice.title, // TODO : should use a method to get the title
+			LastModel: m.ai.choice.title,
 			Name:      "",
 			Messages:  []Message{firstMessage},
 		}
@@ -591,10 +578,10 @@ func initialSave() saveModel {
 
 func (m model) viewSave() string {
 	return fmt.Sprintf(
-		"Enter the name of the conversation \n\n%s\n\n%s",
+		"Enter the name of the conversation \n\n%s\n\n%s\n",
 		m.save.texting.View(),
 		"(esc to quit)",
-	) + "\n"
+	)
 }
 
 func (m model) updateSave(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -609,14 +596,10 @@ func (m model) updateSave(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.chat.conversation.Name = m.save.content
 				// Todo : move from here
 			}
-			err := m.chat.conversation.saveConversation()
-			if err != nil {
-				m.err = append(m.err, err)
-			}
+			m = m.addErr(m.chat.conversation.saveConversation())
 			m = m.switchToConv()
 		case tea.KeyCtrlZ:
-			// TODO : reset the conversation
-			m = m.switchToChat() // TODO : test
+			m = m.switchToChat()
 		}
 	}
 	m.save.texting, cmd = m.save.texting.Update(msg)
@@ -625,7 +608,10 @@ func (m model) updateSave(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m model) switchToSave() model {
 	m.state = SAVE
+	if m.chat.conversation.Name != NEWCONV {
+		m.save.texting.Placeholder = m.chat.conversation.Name
+	}
 	m.save.content = ""
-	m.save.texting.Reset() // TODO : is it necessary ?
+	m.save.texting.Reset()
 	return m
 }
