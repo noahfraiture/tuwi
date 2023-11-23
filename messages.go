@@ -6,9 +6,11 @@ import (
 )
 
 const (
-	roleUser   = "user"
-	modelUser  = "userModel"
-	finishUser = "userEnd"
+	roleUser     = "user"
+	roleSystem   = "system"
+	modelUser    = "userModel"
+	finishUser   = "userEnd"
+	finishSystem = "systemEnd"
 )
 
 type (

@@ -307,19 +307,8 @@ func (m model) updateConv(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyEnter:
 			if i, ok := m.conv.list.SelectedItem().(itemConv); ok {
 				if i.ID == NEWCONV {
-					randomBytes := make([]rune, 8)
-					var letterRunes = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
-					for i := range randomBytes {
-						randomBytes[i] = letterRunes[rand.Intn(len(letterRunes))]
-					}
-					m.chat.conversation = &Conversation{
-						ID:        string(randomBytes),
-						LastModel: "",
-						Name:      "",
-						Messages:  nil,
-						HasChange: false,
-					}
-					// TODO choice : if we go back here, will it reset the conversation ? If yes it must be here
+					// TODO choice : if we go back here, will it reset the conversation ? If yes we should reset the conversation here or in switchToChat
+					m.conv.choice = nil // NOTE : reset the choice if one was selected before
 					m = m.switchToAI()
 				} else {
 					m.chat.conversation = (*Conversation)(&i)
@@ -384,8 +373,8 @@ func (m model) updateAI(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.Type {
 		case tea.KeyEnter:
 			if i, ok := m.ai.list.SelectedItem().(aiVersion); ok {
+				// Here we necessarily have a new conversation that will be reset
 				m.ai.choice = &i
-				m.chat.conversation.LastModel = i.title
 				m = m.switchToSystem()
 			}
 		case tea.KeyCtrlZ:
@@ -437,12 +426,6 @@ func (m model) updateSystem(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.system.content == "" {
 				m.system.content = "You are a helpful assistant\n"
 			}
-			m.chat.conversation.Messages = append(m.chat.conversation.Messages, Message{
-				Role:         openai.ChatMessageRoleSystem,
-				Content:      m.system.content, // TODO : newline missing
-				FinishReason: "systemEnd",
-				Model:        "",
-			})
 			m = m.switchToChat()
 		case tea.KeyCtrlZ:
 			m = m.switchToAI()
@@ -518,6 +501,8 @@ func (m model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.chat.conversation.Messages = append(m.chat.conversation.Messages, userMessage)
 
 			// TODO : could create a function to avoid duplicate code and append err when exist
+			// NOTE : Should I add a "Last conversation" if the user quit without saving ?
+
 			// The answer is add to the conversation if the request is a success.
 			// The point is to handle the error in the chatCompletion function like a black box
 			err := m.chat.conversation.chatCompletion(m.chat.textarea.Value())
@@ -534,13 +519,14 @@ func (m model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.chat.textarea.Reset()
 			m.chat.viewport.GotoBottom()
 		case tea.KeyCtrlS:
+			// TODO : move in switchToSave
 			if m.chat.conversation.Name != NEWCONV {
 				m.save.texting.Placeholder = m.chat.conversation.Name
 			}
 			m = m.switchToSave()
 			return m, nil
 		case tea.KeyCtrlZ:
-			m = m.switchToSystem()
+			m = m.switchToConv()
 		}
 	}
 
@@ -548,6 +534,34 @@ func (m model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) switchToChat() model {
+	if m.chat.conversation == nil {
+
+		if m.conv.choice == nil {
+			m.chat.converstation = m.conv.choice
+		}
+
+		// Random ID
+		randomBytes := make([]rune, 8)
+		var letterRunes = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
+		for i := range randomBytes {
+			randomBytes[i] = letterRunes[rand.Intn(len(letterRunes))]
+		}
+
+		// First system message
+		firstMessage := Message{
+			Role:         openai.ChatMessageRoleSystem,
+			Content:      m.system.content,
+			FinishReason: finishSystem,
+			Model:        roleSystem,
+		}
+
+		m.chat.conversation = &Conversation{
+			ID:        string(randomBytes),
+			LastModel: m.ai.choice.title, // TODO : should use a method to get the title
+			Name:      "",
+			Messages:  []Message{firstMessage},
+		}
+	}
 	m.state = CHAT
 	m.chat.messages = []string{}
 	for _, msg := range m.chat.conversation.Messages {
@@ -558,7 +572,7 @@ func (m model) switchToChat() model {
 }
 
 // SAVE - View to save the conversation. -> Conversation
-// TODO : BUG next window does not show well things
+// TODO : BUG next window does not show well things, it should show all conversations
 
 func initialSave() saveModel {
 	it := textinput.New()
@@ -590,6 +604,7 @@ func (m model) updateSave(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.save.content = m.save.texting.Value()
 			if m.save.content != "" {
 				m.chat.conversation.Name = m.save.content
+			// Todo : move from here
 			}
 			err := m.chat.conversation.saveConversation()
 			if err != nil {
@@ -597,6 +612,7 @@ func (m model) updateSave(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m = m.switchToConv()
 		case tea.KeyCtrlZ:
+			// TODO : reset the conversation
 			m = m.switchToChat() // TODO : test
 		}
 	}
