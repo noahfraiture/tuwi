@@ -32,12 +32,10 @@ type (
 
 	// MAIN MODEL
 	// NOTE : I tried to use interface, but it was more confusing that anything else. The problem is that I need access
-	// to different fields in each model. Also, the switch function become too complex. Making lazy conversation generation
-	// is enough to have isolated function.
-	// The problem with sub structure is reference, parent model don't know its sub model. It has no real meaning
+	// 		  to different fields in each model. Also, the switch function become too complex. Making lazy conversation generation
+	// 		  is enough to have isolated function.
+	// 		  The problem with sub structure is reference, parent model don't know its sub model. It has no real meaning
 	model struct {
-		// TODO : add inheritance
-		// Sub struct
 		key    keyModel
 		conv   convModel
 		ai     aiModel
@@ -282,7 +280,7 @@ func (m model) updateKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m model) switchToKey() model {
 	m.state = KEY
 	m.key.content = ""
-	m.key.texting.Reset() // NOTE : is it necessary ?
+	m.key.texting.Reset()
 	return m
 }
 
@@ -438,7 +436,7 @@ func (m model) updateSystem(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m model) switchToSystem() model {
 	m.state = SYSTEM
 	m.system.content = ""
-	m.system.texting.Reset() // NOTE : is it necessary ?
+	m.system.texting.Reset()
 	return m
 }
 
@@ -501,12 +499,21 @@ func (m model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// TODO : Should I add a "Last conversation" if the user quit without saving ?
 
 			// NOTE : The answer is added to the conversation if the request is a success.
-			// 		  The point is to handle the error in the chatCompletion function like a black box
-			// WARN : Since I use function to handle error, I don't have the possibility return in case of an error
-			m = m.addErr(m.chat.conversation.chatCompletion(m.chat.textarea.Value()))
+			//
+			// NOTE : If we want to have concurrent request, we can't handle the response
+			// 		  in the request function if I want to handle the loading view here
+			// WARN : Since we use go routine, we have to handle the error here
+			c := make(chan gptMessage)
+			go m.chat.conversation.chatCompletion(c)
 
-			botMessage := m.chat.conversation.Messages[len(m.chat.conversation.Messages)-1]
-			m.chat.messages = append(m.chat.messages, botMessage.render())
+			// TODO : Show loading icon until the answer is received
+			// 		  Should wait in another function with a new status
+			// 		  I should use multiple view to do that
+
+			botMessage := <-c
+			currentModel := m.chat.conversation.LastModel
+			m.chat.messages = append(m.chat.messages, botMessage.toMessage(currentModel).render())
+			m.chat.conversation.addMessage(botMessage, currentModel)
 
 			// WARN : We reload the entire conversation, it's simpler but could be optimized
 			m.chat.viewport.SetContent(strings.Join(m.chat.messages, "\n"))

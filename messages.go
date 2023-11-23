@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/sashabaranov/go-openai"
 )
@@ -15,7 +16,7 @@ const (
 
 type (
 	Message struct {
-		Role         string       `json:"role"` // TODO : create a type role for consistency ?
+		Role         string       `json:"role"`
 		Content      string       `json:"content"`
 		FinishReason finishReason `json:"finish_reason"`
 		Model        string       `json:"name"` // WARN : for now it will mix the models and company
@@ -59,7 +60,7 @@ func (m Message) render() string {
 	case finishReason(openai.FinishReasonStop):
 		style = greenStyle
 	}
-	return style.Render(sender) + " " + m.Content
+	return fmt.Sprintf("%s %s", style.Render(sender), m.Content)
 }
 
 func (conv *Conversation) openaiMessages() []openai.ChatCompletionMessage {
@@ -71,6 +72,15 @@ func (conv *Conversation) openaiMessages() []openai.ChatCompletionMessage {
 		}
 	}
 	return list
+}
+
+func (conv *Conversation) addMessage(message gptMessage, model string) {
+
+	// NOTE : we add a message only if there is a response
+	//        We suppose that choices has a minimum size of 1
+	conv.Messages = append(conv.Messages, message.toMessage(model))
+	conv.HasChange = true
+	conv.LastModel = model
 }
 
 func (message userOpenaiMessage) toMessage() Message {

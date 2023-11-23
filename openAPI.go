@@ -27,7 +27,7 @@ func createKey(key string) error {
 	return os.WriteFile("key", []byte(key), 0644)
 }
 
-// getKey NOTE : Lazy load
+// Lazy load
 func getKey() (Key, error) {
 	// Key already loaded
 	if key != "" {
@@ -57,8 +57,6 @@ func getKey() (Key, error) {
 	return key, nil
 }
 
-// invalid TODO : invalid key on every error or need change
-// invalid NOTE : Should never be used outside a function with a malloc
 func (key *Key) invalid() bool {
 	if *key == "" {
 		return false
@@ -93,38 +91,31 @@ func (openClient *OpenClient) invalid() bool {
 	return ok
 }
 
-func (conv *Conversation) chatCompletionSize(maxTokens int, model string) error {
-	client, err := GetClient()
-	if err != nil {
-		return err
-	}
+func (conv *Conversation) chatCompletionSizeModel(maxTokens int, model string, c chan gptMessage) {
+	// TODO : handle error
+	client, _ := GetClient()
 	ctx := context.Background()
 
 	req := openai.ChatCompletionRequest{
 		Model:     model,
 		MaxTokens: maxTokens,
-		Messages:  conv.openaiMessages(), //Note : This already contains the question
+		Messages:  conv.openaiMessages(), // Note : This already contains the question
 		Stream:    false,
 	}
 
-	resp, err := client.CreateChatCompletion(ctx, req)
-	if err != nil {
-		return err
-	}
-
-	// TODO : In which case it should not store the question and the answer ?
-	conv.Messages = append(conv.Messages, gptMessage(resp.Choices[0]).toMessage(model))
-	conv.HasChange = true
-	conv.LastModel = model
-
-	// NOTE : is there a choices 0 in case of err ?
-	return err
+	resp, _ := client.CreateChatCompletion(ctx, req)
+	c <- gptMessage(resp.Choices[0])
+	close(c)
 }
 
-func (conv *Conversation) chatCompletion(model string) error {
-	return conv.chatCompletionSize(MaxTokens, model)
+func (conv *Conversation) chatCompletionModel(model string, c chan gptMessage) {
+	conv.chatCompletionSizeModel(MaxTokens, model, c)
 }
 
-func (conv *Conversation) chatCompletionNoModel() error {
-	return conv.chatCompletion(conv.LastModel)
+func (conv *Conversation) chatCompletionSize(maxTokens int, c chan gptMessage) {
+	conv.chatCompletionSizeModel(maxTokens, conv.LastModel, c)
+}
+
+func (conv *Conversation) chatCompletion(c chan gptMessage) {
+	conv.chatCompletionModel(conv.LastModel, c)
 }

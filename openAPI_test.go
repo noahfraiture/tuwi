@@ -72,7 +72,6 @@ func TestOpenClient_Invalid(t *testing.T) {
 }
 
 func TestConversation_ChatCompletion_Empty(t *testing.T) {
-	// TODO API HAS CHANGE, ERROR
 	choice := openai.ChatCompletionChoice{
 		Index: 0,
 		Message: openai.ChatCompletionMessage{
@@ -88,16 +87,23 @@ func TestConversation_ChatCompletion_Empty(t *testing.T) {
 		Messages:  []Message{gptMessage(choice).toMessage(openai.GPT3Dot5Turbo)},
 		HasChange: false,
 	}
-	err := conversation.chatCompletionNoModel("Hello")
+	question := Message{
+		Role:         roleUser,
+		Content:      "Hello",
+		FinishReason: finishUser,
+		Model:        openai.GPT3Dot5Turbo,
+	}
+	conversation.Messages = append(conversation.Messages, question)
+	err := conversation.chatCompletion()
 	if err != nil {
 		t.Error(err)
 	}
 	fmt.Printf("The response : %s\n", conversation.Messages[len(conversation.Messages)-1].Content)
 	if conversation.Messages[len(conversation.Messages)-1].FinishReason != finishReason(openai.FinishReasonStop) {
-		t.Error("The conversation should have stopped")
+		t.Errorf("The conversation should have stopped : %s", conversation.Messages[len(conversation.Messages)-1].FinishReason)
 	}
 	if len(conversation.Messages) != 3 {
-		t.Error("The conversation should have 3 messages")
+		t.Error("The conversation should have 3 messages but have ", len(conversation.Messages))
 	}
 	if conversation.HasChange != true {
 		t.Error("The conversation should have change flag")
@@ -136,7 +142,14 @@ func TestConversation_ChatCompletion_Full(t *testing.T) {
 		Messages:  messages,
 		HasChange: false,
 	}
-	err := conversation.chatCompletionNoModel("Say 'banana'")
+	question := Message{
+		Role:         roleUser,
+		Content:      "Say 'banana'",
+		FinishReason: finishUser,
+		Model:        openai.GPT3Dot5Turbo,
+	}
+	conversation.Messages = append(conversation.Messages, question)
+	err := conversation.chatCompletion()
 	if err != nil {
 		t.Error(err)
 	}
@@ -184,15 +197,20 @@ func TestConversation_ChatCompletion_TooLong(t *testing.T) {
 		Messages:  messages,
 		HasChange: false,
 	}
-	err := conversation.chatCompletionNoModel("how do you do ? I do fine for my self, " +
-		"I think the most important thing here is that you feel good too. " +
-		"I would like you to explain to me in a few page how you feel")
+	question := Message{
+		Role:         roleUser,
+		Content:      "how do you do ? I do fine for my self, I think the most important thing here is that you feel good too. I would like you to explain to me in a few page how you feel",
+		FinishReason: finishUser,
+		Model:        openai.GPT3Dot5Turbo,
+	}
+	conversation.Messages = append(conversation.Messages, question)
+	err := conversation.chatCompletionSize(10)
 	if err != nil {
 		t.Error(err)
 	}
 	fmt.Printf("The response : %s\n", conversation.Messages[len(conversation.Messages)-1].Content)
 	if conversation.Messages[len(conversation.Messages)-1].FinishReason != finishReason(openai.FinishReasonLength) {
-		t.Error("The conversation should have stopped")
+		t.Errorf("The conversation should have stopped : %s", conversation.Messages[len(conversation.Messages)-1].FinishReason)
 	}
 	if len(conversation.Messages) != 5 {
 		t.Error("The conversation should have 5 messages")
