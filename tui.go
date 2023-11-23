@@ -540,7 +540,7 @@ func (m model) switchToChat() model {
 	if m.chat.conversation == nil {
 
 		if m.conv.choice == nil {
-			m.chat.converstation = m.conv.choice
+			m.chat.conversation = m.conv.choice
 		}
 
 		// Random ID
