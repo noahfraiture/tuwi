@@ -31,7 +31,10 @@ type (
 	tickMsg struct{}
 
 	// MAIN MODEL
-	// TODO : could use factory to remove duplicate code ?
+	// NOTE : I tried to use interface, but it was more confusing that anything else. The problem is that I need access
+	// to different fields in each model. Also, the switch function become too complex. Making lazy conversation generation
+	// is enough to have isolated function.
+	// The problem with sub structure is reference, parent model don't know its sub model. It has no real meaning
 	model struct {
 		// TODO : add inheritance
 		// Sub struct
@@ -604,7 +607,7 @@ func (m model) updateSave(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.save.content = m.save.texting.Value()
 			if m.save.content != "" {
 				m.chat.conversation.Name = m.save.content
-			// Todo : move from here
+				// Todo : move from here
 			}
 			err := m.chat.conversation.saveConversation()
 			if err != nil {
