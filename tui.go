@@ -45,15 +45,11 @@ type (
 
 		conversations Conversations
 
-		renderStyle lipgloss.Style
-		senderStyle lipgloss.Style
-		redStyle    lipgloss.Style
-		greenStyle  lipgloss.Style
-		yellowStyle lipgloss.Style
-		blueStyle   lipgloss.Style
-		err         []error
-		state       string
-		quitting    bool
+		width    int
+		height   int
+		err      []error
+		state    string
+		quitting bool
 	}
 
 	keyModel struct {
@@ -179,13 +175,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		// Resizing can't be done in other function or should return a value
 		// since I can't access through a pointer to the list
-		h, v := m.renderStyle.GetFrameSize()
-		m.conv.list.SetSize(msg.Width-h, msg.Height-v)
-		m.ai.list.SetSize(msg.Width-h, msg.Height-v)
+		m.width = msg.Width
+		m.height = msg.Height
 		break
 	case error:
 		m = m.addErr(msg)
 	}
+
+	m.conv.list.SetSize(m.width, m.height)
+	m.ai.list.SetSize(m.width, m.height)
+	m.chat.viewport.Width = m.width
+	m.chat.viewport.Height = m.height - 5
 
 	switch m.state {
 	case KEY:
@@ -243,14 +243,14 @@ func initialKey() keyModel {
 }
 
 func (m model) viewKey() string {
-	var icon rune
+	var icon string
 	if validKey(m.key.texting.Value()) {
-		icon = '\uf00c'
+		icon = "\uf00c"
 	} else {
-		icon = '\ue654'
+		icon = "\ue654"
 	}
 	return fmt.Sprintf(
-		"Enter your key \n\n%q %s\n\n%s\n",
+		"Enter your key \n\n%s %s\n\n%s\n",
 		icon,
 		m.key.texting.View(),
 		"(esc to quit)",
@@ -340,6 +340,7 @@ func (m model) switchToConv() model {
 		i++
 	}
 	m.conv.list = list.New(listItemConv, list.NewDefaultDelegate(), 0, 0)
+	m.conv.list.SetSize(m.width, m.height)
 	return m
 }
 
@@ -388,6 +389,7 @@ func (m model) updateAI(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m model) switchToAI() model {
 	m.state = AI
 	m.ai.choice = nil
+	m.ai.list.SetSize(m.width, m.height)
 	return m
 }
 
