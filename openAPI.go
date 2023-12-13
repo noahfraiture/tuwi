@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	MaxTokens = 100
+	MaxTokens = 1000
 )
 
 type Key string

@@ -185,7 +185,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.conv.list.SetSize(m.width, m.height)
 	m.ai.list.SetSize(m.width, m.height)
 	m.chat.viewport.Width = m.width
-	m.chat.viewport.Height = m.height - 5
+	m.chat.viewport.Height = m.height - 10
+	m.chat.textarea.SetWidth(m.width - 2)
+	m.chat.textarea.SetHeight(m.height / 10)
 
 	switch m.state {
 	case KEY:
@@ -445,18 +447,16 @@ func (m model) switchToSystem() model {
 // CHAT - View to chat with the AI. CTRL+S -> Save. CTRL+Z -> System
 
 func initialChat() chatModel {
-	vp := viewport.New(100, 30) // TODO : adapt at size of the terminal
+	vp := viewport.New(0, 0) // TODO : adapt at size of the terminal
 	vp.SetContent(`Welcome to the chat room! Type a message and press Enter to send.`)
 
 	ta := textarea.New()
 	ta.Placeholder = "Send a message..."
 	ta.Prompt = "┃ "
-	ta.CharLimit = 280
+	ta.CharLimit = 10000
 	ta.FocusedStyle.CursorLine = lipgloss.NewStyle()
 	ta.ShowLineNumbers = false
 	ta.Focus()
-	ta.SetWidth(30)
-	ta.SetHeight(3)
 
 	return chatModel{
 		conversation: nil,
