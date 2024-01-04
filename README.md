@@ -1,6 +1,6 @@
 # tuwi
 
-> Warning : this project is working but mostly in working. This can be considered as an alpha release. There's known issue listed at the end of this document
+> :warning: : this project is working but mostly in working. This can be considered as an alpha release. There's known issue like width not adapted and more. Bubble tea recently had changes and a new framework "Huh?" came out. To adapt tuwi to it, there's need a lot of refactoring, I will to it someday, but not today. Feel free to make PR if you want to correct these issue
 
 A terminal user interface application to chat with AI such as the different GPT models, DALL-E 3, and Bard. This project has no final goal and may evolve in the future if I want to do cool stuff, but it should stay in the same flow.
 
